@@ -1,0 +1,16 @@
+bluesky:
+  enabled: false
+  seconds: 20
+  reconnects: 2
+  replay_overlap_us: 1000000
+youtube:
+  enabled: false
+  video_ids: []
+  channel_ids: []
+  queries: [car insurance South Africa, home insurance South Africa]
+  max_requests_per_batch: 10
+  search_unit_cost: 100
+  request_delay_seconds: 0.25
+  refresh_hours: 24
+  search_pages_per_query: 2
+  comments_order: time

@@ -1,0 +1,20 @@
+version: rules-v1
+weights:
+  quote: 35
+  recommendation: 30
+  switch: 25
+  premium: 20
+  vehicle: 15
+  south_africa: 15
+  insurer: 10
+  broker: -60
+  job: -50
+  advertisement: -50
+  news: -40
+source_weights: {bluesky: 0, youtube: 0}
+discard_below: 25
+accept_without_llm_above: 85
+local_confidence: 0.85
+max_age_days: 30
+require_south_africa: true
+negative_signals: [broker, job, advertisement, news]

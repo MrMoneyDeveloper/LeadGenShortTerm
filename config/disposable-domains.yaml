@@ -1,0 +1,3 @@
+# Curated starter list. Extend before production; this is not exhaustive.
+domains: [mailinator.com, guerrillamail.com, temp-mail.org, 10minutemail.com, yopmail.com, sharklasers.com]
+role_accounts: [info, sales, admin, support, noreply, no-reply, contact]

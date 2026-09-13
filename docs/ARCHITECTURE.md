@@ -1,566 +1,71 @@
-# LeadGenShortTerm — MVP Data Architecture
+# Phase-1 architecture — authoritative
 
-## Purpose
+This supersedes the older Cloudflare/MWEB design. Phase 1 is a complete code build; runtime verification belongs to Phase 2. Do not start real acquisition during building.
 
-Build a low-cost, checkpointed lead-processing engine for short-term-insurance prospect research.
+## Platforms
 
-The first phase is intentionally **data-first**:
+Render hosts Python/FastAPI and PostgreSQL. PostgreSQL stores bounded source text, stage state, temporary candidates, qualified leads, hashes and metrics. Apps Script calls authenticated HTTP endpoints, writes values to Sheets, and saves daily useful-data exports to Drive under the authorized Google account. Python needs no Google service account or Drive credentials.
 
-1. collect public records;
-2. process them quickly;
-3. discard low-value material;
-4. retain only qualified candidates, validated contact data, hashes, and pipeline state;
-5. postpone outbound email until the lead engine has proven useful.
+Cloudflare R2/D1, GitHub Actions, MWEB, SMTP and forwarding are absent. The historical architecture file is retained for context only.
 
----
+## Flow and transaction boundaries
 
-# 1. High-level flow
+1. **Collect:** adapters receive persisted cursors and a raw scan limit, default 600. Bluesky preselects keywords within bounded WebSocket windows. YouTube discovers configured videos/channels/searches and reads top-level comments. Source-record/content hashes, rows, metrics, checkpoint and collection-job completion commit atomically. Full upstream responses are never stored.
+2. **Normalize/filter:** Unicode/entity/whitespace normalization precedes keyword, negative and recency rules. Weights, products, geography and thresholds are in YAML. Negatives/low scores are deleted. Accepted emails/identities and active candidate identities are deduplicated before inference. Public contacts/provenance are extracted before evidence redaction/reduction to 2000 characters.
+3. **Classify:** high deterministic confidence with product/geography bypasses AI. Otherwise a hash-pinned local TF-IDF/logistic model is used if present. Confident negatives reject; positives still require product/geography gates. Grok handles remaining ambiguity with strict JSON. Input excludes author/profile payloads and redacts email/phone/URL/handle data. Unavailable AI defers to retries/REVIEW.
+4. **Validate:** public-text emails pass normalization, syntax, role/disposable checks, DNS MX and null-MX rejection. Temporary DNS failures retry. Email and identity uniqueness prevent duplicate leads. Intent and contact source URLs survive. No SMTP probing, guessed emails, private profiles or cross-site enrichment.
+5. **Cleanup/export:** stages commit independently. Raw is removed after reduction by default. Retention removes expired terminal raw/candidates/jobs/cache in bounded chunks. Unfinished raw remains recoverable. Validated leads remain until an explicit later lifecycle policy. Sheets uses samples; Drive gets useful-lead snapshots.
 
-```text
-SOURCE ADAPTERS
-Bluesky / YouTube / approved public web
-        |
-        v
-RENDER PYTHON SERVICE
-        |
-        +--> normalize
-        +--> deterministic filter
-        +--> dedupe
-        +--> local score / classifier
-        +--> Grok for ambiguous candidates
-        +--> email discovery / validation
-        |
-        v
-RENDER POSTGRESQL
-        |
-        +--> source cursors
-        +--> processing jobs
-        +--> candidate state
-        +--> dedupe hashes
-        +--> validated leads
-        +--> metrics
-        |
-        v
-LATER: APPS SCRIPT / SHEETS DASHBOARD
-```
+## Database schema
 
-Cloudflare R2/D1 is not required for this MVP. It can be introduced if/when the free Render database or processing model becomes inadequate.
+Immutable Alembic revision `0001_phase1` creates 13 tables:
 
----
-
-# 2. Core design decision: process fast, retain selectively
-
-The system should not act as a raw-data archive.
-
-For each batch:
-
-```text
-pull
-  ↓
-normalize
-  ↓
-filter
-  ↓
-dedupe
-  ↓
-score
-  ↓
-classify uncertain records
-  ↓
-email discovery / validation
-  ↓
-persist accepted candidate state
-  ↓
-delete/reduce rejected raw content
-```
-
-Recommended retention:
-
-| State | Retention |
+| Table | Purpose |
 |---|---|
-| Raw record | 1–7 days |
-| Rejected record | Delete after processing |
-| Candidate | Until qualification finishes |
-| Validated lead | Through campaign/export lifecycle |
-| Dedupe hash | Long-term |
-| Suppression hash | Long-term once outbound phase exists |
+| source_cursors | Source JSON checkpoint, enabled state, retry/time and last success |
+| pipeline_state | Singleton durable pause, initially true |
+| processing_jobs | Idempotency key, kind/source, attempts, timestamps, cursors, status/result |
+| source_records | Short-lived bounded text, source reference and identity/content hashes |
+| dedupe_index | Record/content/email/lead hashes plus temporary candidate identity claims |
+| identity_index | Source identity hash, optional email hash, first/last seen |
+| candidates | Short evidence, contacts/provenance, scores, product, stage/retry |
+| classification_results | Unique candidate/provider result and version; cascades on expiry |
+| email_validation | Email-hash DNS result/cache; no duplicated raw email |
+| validated_leads | Unique email and source identity, provenance, evidence, product/score |
+| pipeline_metrics | Daily per-source counters |
+| api_usage | Persistent provider budgets, input/output tokens and estimated cost |
+| failed_jobs | Sanitized error codes/IDs, no raw exceptions or source payloads |
 
-The database must store enough source evidence to explain why a prospect qualified without retaining every unnecessary field from the original scrape.
+Indexes cover source/status, queue availability, timestamps, scores, identity/email/content hashes and composite claims. SHA-256 uses normalized input; primary/unique constraints are final enforcement. Hash admissions use savepoints for all-or-nothing multi-key claims. Hashes are pseudonymous identifiers, not encryption.
 
----
+## Jobs and controls
 
-# 3. Data-volume target
+HTTP enqueue commits before returning. The optional internal scheduler or Apps Script tick enqueues eligible missing stages; `/jobs/process-next` requests one bounded execution. A PostgreSQL session advisory lock permits one executor across processes. Process loss releases it, allowing abandoned RUNNING jobs to be reclaimed. Each candidate or small source batch commits independently; no 200,000-row transaction exists.
 
-Target acquisition throughput:
+Errors back off; repeated failures enter FAILED/REVIEW and close the failing source's DB gate. Operator retries preserve qualification gates. Environment flags, YAML source flags, durable source flags and pause all apply. Cleanup is permitted while paused. Deploying does not install or enable schedules.
 
-```text
-~200,000 raw records / 7 days
-~28,600 records/day
-```
+The executor is initially serial. ML/Grok/DNS may yield fewer than 600 candidates within its time budget. Free-service uptime, CPU, API quotas and source quality must be measured before the one-week goal. The schedule is restartable, not a parallel worker fleet.
 
-This should be achieved with small, checkpointed batches rather than long jobs.
+## Adapters and budgets
 
-Initial batch size:
+- **Bluesky:** legacy-compatible `/subscribe`, configured collection, microsecond cursor with overlap, record/time/connection bounds and limited reconnects. Public replay is finite; long outages may leave gaps.
+- **YouTube:** video IDs, channel searches, keyword searches, discovery/video queue, comment-page cursor and refresh windows. Top-level comments only. Disabled comments skip; invalid page tokens replay through dedupe. Search-call and conservative unit caps are persisted before requests; provider denial preserves cursors and delays retry.
+- **Grok:** strict JSON Schema/Pydantic contract over `/v1/chat/completions`; two bounded attempts with backoff, daily reservations, token/cost accounting. Classification jobs batch candidates but call inference sequentially. No asynchronous provider Batch API is needed for the initial small workload. A crash after response but before DB commit may repeat a paid request; each attempt consumes budget.
 
-```text
-500–1,000 records
-```
+New approved public-web/forum sources can implement `Adapter` and join the registry without changing qualification logic.
 
-Every batch must have:
+## Google
 
-```text
-batch_id
-source
-cursor_in
-cursor_out
-record_count
-status
-attempt_count
-created_at
-completed_at
-```
+Script Properties contain backend origin, separate read/operator tokens, Sheet/folder IDs and schedule gates. Tabs are SUMMARY, SOURCE_STATS, VALIDATED, FAILED, PROCESSING, EXPORT_HISTORY. Values are server-computed and formula-leading strings escaped. VALIDATED is capped at 500 rows; Sheets is not the raw database.
 
-Retries must be idempotent.
+Drive backups freeze a lead high-water ID, fetch 1000-row CSV parts and save deterministic daily filenames with SHA-256 sidecars. Script lock and persisted stage/page state support retries. Source CSV, processing/failure JSON and completion manifest are also written. These are useful-data exports; full operational-state recovery requires a separate PostgreSQL backup. See [operations](OPERATIONS.md).
 
----
+## Protocol references checked during build
 
-# 4. Source adapters
+- [Bluesky legacy Jetstream](https://github.com/bluesky-social/jetstream-legacy)
+- [YouTube search](https://developers.google.com/youtube/v3/docs/search/list) and [comment threads](https://developers.google.com/youtube/v3/docs/commentThreads/list)
+- [xAI structured outputs](https://docs.x.ai/developers/model-capabilities/text/structured-outputs)
+- [Apps Script Drive folders](https://developers.google.com/apps-script/reference/drive/folder), [locks](https://developers.google.com/apps-script/reference/lock/lock-service), [triggers](https://developers.google.com/apps-script/guides/triggers/installable)
+- [Render Blueprint schema](https://render.com/schema/render.yaml.json)
 
-Use a common source interface.
-
-```python
-class SourceAdapter:
-    def collect(self, cursor: str | None, limit: int):
-        ...
-```
-
-Return:
-
-```python
-class BatchResult:
-    records: list
-    next_cursor: str | None
-    exhausted: bool
-    metrics: dict
-```
-
-Initial adapters:
-
-```text
-collectors/
-  bluesky/
-  youtube/
-  public_web/
-```
-
-Each adapter owns its own cursor and enabled/disabled state.
-
-One failed source must not reset another.
-
----
-
-# 5. Configuration-driven intent rules
-
-Do not hard-code search terms or scoring rules inside scrapers.
-
-Suggested files:
-
-```text
-config/
-  sources.yaml
-  keywords.yaml
-  scoring.yaml
-  runtime.yaml
-  retention.yaml
-```
-
-Example `keywords.yaml`:
-
-```yaml
-motor:
-  explicit:
-    - car insurance
-    - vehicle insurance
-    - motor insurance
-    - insurance quote
-
-  intent:
-    - looking for insurance
-    - need insurance
-    - recommend insurance
-    - switch insurance
-    - premium increased
-    - insurance too expensive
-    - cheaper insurance
-
-  context:
-    - bought a car
-    - new car
-    - first car
-    - financed car
-
-negative:
-  - insurance broker
-  - insurance agent
-  - insurance vacancy
-  - insurance job
-  - insurance news
-  - advertisement
-  - sponsored
-```
-
----
-
-# 6. Deterministic scoring
-
-Starting example only:
-
-```text
-+35 explicit quote request
-+30 asks for recommendation
-+25 wants to switch insurer
-+20 premium complaint
-+15 recent vehicle purchase
-+15 South Africa signal
-+10 named insurer
-
--60 broker/agent sales content
--50 job/recruitment
--50 advertisement
--40 news/press
-```
-
-Suggested stages:
-
-```text
-score < 25
-  -> reject
-
-score 25–84
-  -> local classifier / Grok depending on confidence
-
-score >= 85
-  -> accept without Grok if all other rules pass
-```
-
-Thresholds must be calibrated against real labelled samples.
-
----
-
-# 7. Local classifier
-
-After enough labelled data exists, train a lightweight local model before using Grok heavily.
-
-Recommended first implementation:
-
-```text
-TF-IDF
-+
-Logistic Regression
-```
-
-Suggested labels:
-
-```text
-HIGH_INTENT
-MEDIUM_INTENT
-LOW_INTENT
-NOT_INSURANCE
-ADVERTISEMENT
-BROKER_OR_AGENT
-NEWS
-JOB_POST
-```
-
-Store classifier/model version on each scored candidate.
-
----
-
-# 8. Grok / xAI responsibilities
-
-Grok should only perform semantic classification where rules/local models are uncertain.
-
-Expected structured output:
-
-```json
-{
-  "is_short_term_insurance_relevant": true,
-  "intent_level": "HIGH",
-  "product": "MOTOR",
-  "is_consumer": true,
-  "is_advertisement": false,
-  "is_broker_or_agent": false,
-  "south_africa_signal": true,
-  "score": 92,
-  "reason": "User is explicitly asking for cheaper motor insurance after a premium increase."
-}
-```
-
-Do not use Grok for:
-
-```text
-email syntax
-DNS lookup
-MX lookup
-duplicate lookup
-simple keyword presence
-```
-
-Those are deterministic tasks.
-
----
-
-# 9. Email discovery and validation
-
-Email handling should follow deterministic gates:
-
-```text
-email found
-  ↓
-normalize
-  ↓
-syntax check
-  ↓
-domain exists
-  ↓
-MX exists
-  ↓
-disposable-domain check
-  ↓
-dedupe
-  ↓
-validated candidate
-```
-
-Recommended states:
-
-```text
-INVALID_SYNTAX
-NO_DOMAIN
-NO_MX
-RISKY
-DELIVERABLE_DOMAIN
-VALIDATED
-```
-
-MX existence does not prove a specific mailbox exists.
-
-Avoid aggressive SMTP mailbox probing.
-
----
-
-# 10. Suggested PostgreSQL schema
-
-Minimal MVP tables:
-
-```sql
-CREATE TABLE source_cursors (
-    source TEXT PRIMARY KEY,
-    cursor TEXT,
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE processing_jobs (
-    batch_id TEXT PRIMARY KEY,
-    source TEXT NOT NULL,
-    status TEXT NOT NULL,
-    cursor_in TEXT,
-    cursor_out TEXT,
-    record_count INTEGER DEFAULT 0,
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
-);
-
-CREATE TABLE identity_index (
-    identity_hash TEXT PRIMARY KEY,
-    email_hash TEXT,
-    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE candidates (
-    lead_id UUID PRIMARY KEY,
-    source TEXT NOT NULL,
-    source_record_id TEXT,
-    source_url TEXT,
-    display_name TEXT,
-    public_handle TEXT,
-    intent_excerpt TEXT,
-    product_type TEXT,
-    deterministic_score INTEGER,
-    ml_score DOUBLE PRECISION,
-    llm_score INTEGER,
-    final_score INTEGER,
-    email TEXT,
-    email_hash TEXT,
-    status TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_candidates_email_hash
-ON candidates(email_hash)
-WHERE email_hash IS NOT NULL;
-```
-
-Do not store giant raw payloads in `candidates`.
-
----
-
-# 11. Render API shape
-
-First useful endpoints:
-
-```http
-GET  /health
-POST /jobs/run-batch
-GET  /jobs/{batch_id}
-GET  /metrics/summary
-GET  /leads/validated
-GET  /export/validated.csv
-```
-
-Possible source-control endpoints later:
-
-```http
-POST /sources/{source}/enable
-POST /sources/{source}/disable
-GET  /sources/status
-```
-
-Do not expose destructive/admin endpoints without authentication.
-
----
-
-# 12. Environment variables for data phase
-
-Minimum planned values:
-
-```text
-ENVIRONMENT=development
-LOG_LEVEL=INFO
-DATABASE_URL=
-
-XAI_API_KEY=
-XAI_MODEL=
-
-YOUTUBE_API_KEY=
-
-BLUESKY_JETSTREAM_HOST=jetstream.us-east.bsky.network
-BLUESKY_COLLECTION=app.bsky.feed.post
-
-PROCESSING_BATCH_SIZE=500
-RAW_RETENTION_DAYS=3
-DELETE_REJECTED_RAW=true
-```
-
-`DATABASE_URL` should come from Render when PostgreSQL is linked.
-
-No MWEB variables are required in Phase 1.
-
----
-
-# 13. Apps Script later
-
-Apps Script is introduced only after the backend produces useful validated data.
-
-Responsibilities:
-
-```text
-scheduled trigger calls
-dashboard refresh
-source metrics
-validated-lead export
-daily CSV/Sheet backup
-manual review
-```
-
-Sheets should contain values/exports rather than formula-heavy processing logic.
-
----
-
-# 14. Safety / failure controls
-
-The application must have:
-
-```text
-per-source enable/disable flags
-batch retry limits
-exponential backoff
-API quota handling
-maximum batch size
-maximum Grok candidates per run/day
-Postgres-size monitoring
-cleanup jobs
-export before destructive cleanup
-```
-
-No collector should loop indefinitely without moving its cursor.
-
----
-
-# 15. MVP acceptance criteria
-
-The data engine is considered proven when one source can reliably perform:
-
-```text
-collect 500–1,000 records
-  ↓
-checkpoint source cursor
-  ↓
-normalize
-  ↓
-filter
-  ↓
-dedupe
-  ↓
-score
-  ↓
-Grok uncertain cases only
-  ↓
-validate discovered email
-  ↓
-store useful candidate
-  ↓
-export validated records
-```
-
-Then scale volume gradually.
-
-Do not add email delivery until this milestone is reliable and the lead quality has been manually reviewed.
-
----
-
-# 16. Why not Cloudflare first?
-
-Cloudflare R2/D1 remains a valid future architecture, but the MVP intentionally avoids it because:
-
-- the immediate question is lead quality, not distributed storage;
-- R2 requires enabling billable usage beyond the included free allowance;
-- Render already hosts the Python processing service;
-- one Postgres database is simpler for an AI coding agent to reason about;
-- fewer moving parts means faster proof of concept.
-
-If the MVP proves value, migration can happen later with explicit retention and cost controls.
-
----
-
-# 17. Next implementation order
-
-```text
-1. repository skeleton
-2. Render FastAPI service
-3. Render PostgreSQL connection + migrations
-4. source cursor/job tables
-5. Bluesky collector
-6. deterministic filter/scoring
-7. dedupe
-8. Grok structured classifier
-9. email validation
-10. validated export
-11. YouTube adapter
-12. Apps Script dashboard/backup
-13. only then outbound-email architecture
-```
+These define protocol shapes, not verified account access. Recheck actual quotas/model pricing before live calls.

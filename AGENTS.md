@@ -4,6 +4,12 @@ Instructions for Codex and other coding agents working in this repository.
 
 ## Current milestone
 
+Phase 1 now includes both Bluesky and YouTube, Google Apps Script dashboard and Google Drive
+daily useful-data backups. The code build is complete; **do not run tests, migrations, real
+collection, inference, Google writes, or production schedules until the user starts Phase 2**.
+Static syntax/lint/build checks are allowed. Read `docs/PHASE_2_TESTING.md` before that phase.
+`docs/ARCHITECTURE.md` is authoritative; the root historical architecture is superseded.
+
 Build the **data acquisition and qualification engine only**.
 
 Do not implement production outbound email yet.
@@ -152,7 +158,7 @@ A failed batch must not duplicate accepted candidates when retried.
 Begin with:
 
 ```text
-500 records/batch
+600 records/batch (use 1–5 for Phase-2 source checks)
 ```
 
 Scale only after the entire flow completes reliably.
@@ -168,5 +174,15 @@ This is a processing-throughput target, not a requirement to permanently store 2
 ## Outbound email
 
 Do not add MWEB SMTP, consent-request sending, or forwarding automation until explicitly requested after the data MVP has been reviewed.
+
+## Implemented operational rules
+
+- Keep acquisition, processing, source, Grok and scheduler defaults disabled; the database starts paused.
+- Keep both example environment files empty. Actual local configuration is in ignored `.env`.
+- Google Sheets is a values dashboard capped to samples; Google Drive holds paginated useful-lead CSV/JSON exports.
+- Never invoke Apps Script trigger installation just because its code exists.
+- Migrations are explicit, versioned and absent from application startup.
+- Preserve durable job/cursor/hash atomicity and PostgreSQL advisory executor ownership.
+- Do not add external messaging or outbound libraries during this phase.
 
 If outbound work is later added, compliance/suppression state must be treated as durable system state and never bypassed.

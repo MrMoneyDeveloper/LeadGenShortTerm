@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.venv/
+.test-runtime/
+.env.test
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.clasprc.json
+.clasp.json
+credentials*.json
+ml/models/*.joblib
+ml/training/*.csv
+!ml/training/example.csv
+ml/evaluation/*.json

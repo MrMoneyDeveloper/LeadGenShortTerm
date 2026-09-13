@@ -1,4 +1,8 @@
 # Short-Term Insurance Lead Engine
+
+> HISTORICAL / SUPERSEDED: This early Cloudflare/MWEB proposal is retained only for context.
+> Follow `docs/ARCHITECTURE.md`, `README.md`, and the current Phase-1 instructions instead.
+> Do not implement or activate the outbound/Cloudflare components described below.
 ## Repository Architecture & AI-Agent Build Specification
 
 **Status:** Proposed MVP architecture  

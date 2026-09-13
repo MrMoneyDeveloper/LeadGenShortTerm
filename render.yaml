@@ -1,0 +1,33 @@
+# Existing PostgreSQL is configured via DATABASE_URL; no new database is provisioned.
+services:
+  - type: web
+    name: leadgen-shortterm-api
+    runtime: python
+    plan: free
+    autoDeployTrigger: 'off'
+    buildCommand: pip install -r services/render_api/requirements.txt
+    startCommand: python -m uvicorn app.main:app --app-dir services/render_api --host 0.0.0.0 --port $PORT --workers 1 --no-access-log
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: DATABASE_URL
+        sync: false
+      - key: PROCESSOR_TRIGGER_TOKEN
+        generateValue: true
+      - key: DASHBOARD_API_TOKEN
+        generateValue: true
+      - key: ACQUISITION_ENABLED
+        value: 'false'
+      - key: PROCESSING_ENABLED
+        value: 'false'
+      - key: BLUESKY_ENABLED
+        value: 'false'
+      - key: YOUTUBE_ENABLED
+        value: 'false'
+      - key: GROK_ENABLED
+        value: 'false'
+      - key: SCHEDULER_ENABLED
+        value: 'false'
+      - key: PROCESSING_BATCH_SIZE
+        value: '600'

@@ -1,0 +1,17 @@
+relevance_terms: [insurance]
+products:
+  MOTOR: [motor insurance, car insurance, vehicle insurance, vehicle cover]
+  HOME: [home insurance, house insurance, building insurance]
+  CONTENTS: [household insurance, contents insurance]
+signals:
+  quote: [looking for insurance, need insurance, insurance quote, need a quote, want a quote]
+  recommendation: [recommend insurance, insurance recommendations, who should I insure with]
+  switch: [switch insurance, changing insurer, switch insurer]
+  premium: [premium increased, too expensive, cheaper insurance]
+  vehicle: [new car, bought a car, first car, financed car]
+  south_africa: [south africa, johannesburg, cape town, durban, pretoria, gauteng, mzansi]
+  insurer: [outsurance, discovery insure, king price, santam, miway, budget insurance, auto & general]
+  broker: [insurance broker, insurance agent, i sell insurance, contact me for insurance]
+  job: [insurance vacancy, insurance job, hiring, insurance careers]
+  advertisement: [advertisement, sponsored content, sponsored, get your quote today]
+  news: [press release, insurance news]
