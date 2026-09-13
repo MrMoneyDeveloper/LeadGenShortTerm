@@ -49,7 +49,7 @@ function safeCell_(value) {
 
 function errorCode_(error) {
   const message = String(error.message || '');
-  return /^(CONFIG_[A-Z_]+|RENDER_[A-Z_0-9]+|BACKUP_[A-Z_]+)$/.test(message) ? message : 'GOOGLE_OPERATION_FAILED';
+  return /^(CONFIG_[A-Z_]+|RENDER_[A-Z_0-9]+|BACKUP_[A-Z_]+|DELIVERY_[A-Z_]+)$/.test(message) ? message : 'GOOGLE_OPERATION_FAILED';
 }
 
 function status_(component, status, detail) {
@@ -61,6 +61,7 @@ function status_(component, status, detail) {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('LeadGen data phase')
     .addItem('Refresh dashboard', 'refreshDashboard')
+    .addItem('Deliver next final lead batch', 'deliverFinalLeads')
     .addItem('Run/resume daily backup', 'dailyBackup')
     .addItem('Pause pipeline', 'pausePipeline')
     .addItem('Resume pipeline flags', 'resumePipeline')

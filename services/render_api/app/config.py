@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from datetime import datetime
 from typing import Literal
 
 import yaml
@@ -24,6 +25,26 @@ class Settings(BaseSettings):
     processing_batch_size: int = Field(600, ge=1, le=2000)
     raw_daily_target: int = Field(30000, ge=1)
     max_pending_raw: int = Field(12000, ge=1)
+    queue_high_water: int = Field(1800, ge=1)
+    queue_low_water: int = Field(400, ge=0)
+    database_high_water_bytes: int = Field(750_000_000, ge=1)
+    database_low_water_bytes: int = Field(600_000_000, ge=1)
+    campaign_id: str = Field("phase2", pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    campaign_deadline: datetime | None = None
+    final_delivery_enabled: bool = False
+    google_spreadsheet_id: str = ""
+    google_drive_backup_folder_id: str = ""
+    export_batch_size: int = Field(100, ge=1, le=200)
+    sheet_shard_rows: int = Field(5000, ge=1, le=5000)
+    semantic_provider: Literal["groq", "xai"] = "groq"
+    groq_enabled: bool = False
+    groq_api_key: SecretStr = SecretStr("")
+    groq_model: str = ""
+    groq_daily_candidate_cap: int = Field(100, ge=0)
+    groq_input_usd_per_million: float = Field(0, ge=0)
+    groq_output_usd_per_million: float = Field(0, ge=0)
+    semantic_max_attempts: int = Field(2, ge=1, le=3)
+    semantic_timeout_seconds: int = Field(20, ge=5, le=60)
     raw_retention_days: int = Field(3, ge=1, le=30)
     candidate_retention_days: int = Field(30, ge=1)
     operational_retention_days: int = Field(30, ge=1)
@@ -55,6 +76,12 @@ class Settings(BaseSettings):
             raise ValueError("API tokens must be at least 32 characters")
         if a and a == b:
             raise ValueError("Use separate processor and dashboard tokens")
+        if self.queue_low_water >= self.queue_high_water:
+            raise ValueError("QUEUE_LOW_WATER must be below QUEUE_HIGH_WATER")
+        if self.database_low_water_bytes >= self.database_high_water_bytes:
+            raise ValueError("Database low water must be below high water")
+        if self.campaign_deadline and self.campaign_deadline.tzinfo is None:
+            raise ValueError("CAMPAIGN_DEADLINE must include a timezone")
         return self
 
 

@@ -5,7 +5,7 @@ from sqlalchemy import func, select, text
 
 from app.config import settings
 from app.database import session
-from app.models import Candidate, Failure, Job, Lead, Metric, PipelineState, SourceCursor, SourceRecord, Usage, now
+from app.models import Candidate, ExportBatch, Failure, Job, Lead, Metric, PipelineState, SourceCursor, SourceRecord, Usage, now
 
 LEAD_FIELDS = [
     "id",
@@ -21,6 +21,8 @@ LEAD_FIELDS = [
     "status",
     "validation_status",
     "created_at",
+    "profile",
+    "rank_score",
 ]
 
 
@@ -50,12 +52,17 @@ def summary():
                     "bluesky_enabled",
                     "youtube_enabled",
                     "grok_enabled",
+                    "groq_enabled",
+                    "final_delivery_enabled",
                     "scheduler_enabled",
                 ]
             },
             "today": dict(metrics),
             "candidates": db.scalar(select(func.count()).select_from(Candidate)),
             "validated": db.scalar(select(func.count()).select_from(Lead)),
+            "final_output_location": "Google Sheets VALIDATED_001 and subsequent shards; Drive backup",
+            "delivered": db.scalar(select(func.sum(ExportBatch.count)).where(ExportBatch.status == "ACKNOWLEDGED")) or 0,
+            "semantic_provider": cfg.semantic_provider,
             "raw_pending": db.scalar(
                 select(func.count()).select_from(SourceRecord).where(SourceRecord.status == "PENDING")
             ),

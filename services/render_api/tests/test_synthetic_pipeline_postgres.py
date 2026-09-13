@@ -50,18 +50,18 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
         (
             9,
             "dup-email-a",
-            "Need quote for car insurance Johannesburg, premium increased, changing insurer. shared@example.org",
+            "Need a quote for car insurance Johannesburg, premium increased, changing insurer. shared@example.org",
         ),
         (
             10,
             "dup-email-b",
-            "Need quote for home insurance Cape Town, premium increased, changing insurer. shared@example.org",
+            "Need a quote for home insurance Cape Town, premium increased, changing insurer. shared@example.org",
         ),
-        (11, "bad-mail", "Need quote for car insurance Johannesburg, premium increased, changing insurer. person@@bad"),
+        (11, "bad-mail", "Need a quote for car insurance Johannesburg, premium increased, changing insurer. person@@bad"),
         (
             12,
             "no-mx",
-            "Need quote for contents insurance Pretoria, premium increased, changing insurer. person@nomx.test",
+            "Need a quote for contents insurance Pretoria, premium increased, changing insurer. person@nomx.test",
         ),
         (13, "irrelevant", "Lovely weather and football today"),
         (14, "ambiguous", "Car insurance in Durban is too expensive, any thoughts? ambiguous@example.org"),
@@ -71,7 +71,7 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
             add_raw(db, *item)
     monkeypatch.setattr(pipeline.local, "classify", lambda text: None)
     monkeypatch.setattr(
-        pipeline.grok,
+        pipeline.semantic,
         "classify",
         lambda text, score: SemanticResult(
             is_short_term_insurance_relevant=True,
@@ -81,7 +81,7 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
             is_advertisement=False,
             is_broker_or_agent=False,
             south_africa_signal=True,
-            score=65,
+            score=85,
             reason="Consumer asks about cost",
         ),
     )
@@ -95,22 +95,23 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
 
     assert pipeline.normalize_batch(100)["normalized"] == len(records)
     assert pipeline.normalize_batch(100)["normalized"] == 0
+    pipeline.validate_batch(100)
+    pipeline.validate_batch(100)
     pipeline.classify_batch(100)
-    pipeline.validate_batch(100)
-    pipeline.validate_batch(100)
 
     with postgres() as db:
         leads = db.scalars(select(Lead).order_by(Lead.email)).all()
         emails = [lead.email for lead in leads]
-        assert "motor@example.org" in emails and "home@example.org" in emails and "ambiguous@example.org" in emails
+        assert "motor@example.org" in emails and "home@example.org" in emails
+        assert "ambiguous@example.org" not in emails  # Low evidence stays local-only under the new rank policy.
         assert emails.count("shared@example.org") == 1
-        assert db.scalar(select(func.count()).select_from(Lead)) == 5
-        assert db.scalar(select(func.count()).select_from(Candidate)) == 8
+        assert db.scalar(select(func.count()).select_from(Lead)) == 3
+        assert db.scalar(select(func.count()).select_from(Candidate)) == 5
         states = dict(db.execute(select(Candidate.identity_hash, Candidate.status)).all())
         assert "CONTACT_REVIEW" in states.values()
         assert db.scalar(select(func.count()).select_from(SourceRecord)) == 0
-        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("email:%"))) == 5
-        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("lead:%"))) == 5
+        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("email:%"))) == 3
+        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("lead:%"))) == 3
         assert db.get(SourceCursor, "synthetic") is None
 
     # Re-adding a source record after reduction cannot produce another accepted lead.
@@ -119,4 +120,4 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
     pipeline.normalize_batch(10)
     pipeline.validate_batch(10)
     with postgres() as db:
-        assert db.scalar(select(func.count()).select_from(Lead)) == 5
+        assert db.scalar(select(func.count()).select_from(Lead)) == 3

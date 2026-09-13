@@ -1,12 +1,12 @@
 import json
 import time
-from datetime import datetime
 from urllib.parse import urlencode
 
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
-from app.collectors.base import Batch, Record, SourceError
+from app.collectors.base import Batch, SourceError
+from app.collectors.profiles import bluesky_profile
 from app.config import rules, settings
 from app.qualification import discovery_match
 
@@ -55,20 +55,10 @@ class Bluesky:
                         if not did or not rkey:
                             continue
                         try:
-                            published = datetime.fromisoformat(data["createdAt"].replace("Z", "+00:00"))
-                            if published.tzinfo is None:
-                                continue
-                        except (ValueError, KeyError):
+                            record = bluesky_profile(event)
+                        except (ValueError, KeyError, TypeError):
                             continue
-                        result.records.append(
-                            Record(
-                                f"{did}/{rkey}",
-                                did,
-                                text[:16000],
-                                f"https://bsky.app/profile/{did}/post/{rkey}",
-                                published,
-                            )
-                        )
+                        result.records.append(record)
                 break
             except (OSError, ConnectionClosed, TimeoutError):
                 if attempt < cfg["reconnects"]:

@@ -58,7 +58,9 @@ def add_classify_candidate(db, number):
         identity_hash=digest(f"classify:{number}"),
         excerpt=f"ambiguous car insurance request {number}",
         product_type="MOTOR",
-        score=50,
+        score=100,
+        contacts=[{"email": f"classify-{number}@example.org", "source_url": "https://example.test",
+                   "status": "DELIVERABLE_DOMAIN", "validated_at": now().isoformat()}],
         status="CLASSIFY",
         created_at=now() + timedelta(microseconds=number),
     )
@@ -69,7 +71,7 @@ def add_classify_candidate(db, number):
             candidate_id=candidate.id,
             provider="rules",
             version="fixture",
-            result={"signals": ["south_africa"]},
+            result={"signals": ["south_africa"], "score": 100, "product_type": "MOTOR"},
         )
     )
 
@@ -91,7 +93,7 @@ def test_classification_commits_completed_items_and_resumes(postgres, monkeypatc
     with pytest.raises(RuntimeError, match="controlled interruption"):
         pipeline.classify_batch(2)
     with postgres() as db:
-        assert list(db.scalars(select(Candidate.status).order_by(Candidate.created_at))) == ["VALIDATE", "CLASSIFY"]
+        assert list(db.scalars(select(Candidate.status).order_by(Candidate.created_at))) == ["VALIDATED", "CLASSIFY"]
     monkeypatch.setattr(
         pipeline.local,
         "classify",
@@ -99,7 +101,7 @@ def test_classification_commits_completed_items_and_resumes(postgres, monkeypatc
     )
     assert pipeline.classify_batch(2) == {"classified": 1}
     with postgres() as db:
-        assert set(db.scalars(select(Candidate.status))) == {"VALIDATE"}
+        assert set(db.scalars(select(Candidate.status))) == {"VALIDATED"}
         assert db.scalar(select(func.count()).select_from(Classification).where(Classification.provider == "local")) == 2
 
 
@@ -132,10 +134,11 @@ def test_validation_commits_completed_items_and_resumes_without_duplicates(postg
     with pytest.raises(RuntimeError, match="controlled interruption"):
         pipeline.validate_batch(2)
     with postgres() as db:
-        assert db.scalar(select(func.count()).select_from(Lead)) == 1
+        assert db.scalar(select(func.count()).select_from(Lead)) == 0
+        assert list(db.scalars(select(Candidate.status).order_by(Candidate.created_at))) == ["CLASSIFY", "VALIDATE"]
     monkeypatch.setattr(pipeline, "validate_contact", lambda _email: ("DELIVERABLE_DOMAIN", "controlled_fixture"))
     assert pipeline.validate_batch(2) == {"validated_checked": 1}
     assert pipeline.validate_batch(2) == {"validated_checked": 0}
     with postgres() as db:
-        assert db.scalar(select(func.count()).select_from(Lead)) == 2
-        assert set(db.scalars(select(Candidate.status))) == {"VALIDATED"}
+        assert db.scalar(select(func.count()).select_from(Lead)) == 0
+        assert set(db.scalars(select(Candidate.status))) == {"CLASSIFY"}

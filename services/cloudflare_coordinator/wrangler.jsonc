@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "leadgen-coordinator-test",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-09-13",
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": { "crons": [] },
+  "vars": {
+    "ENVIRONMENT": "test",
+    "COORDINATOR_ENABLED": "false",
+    "COORDINATOR_ALLOW_PRODUCTION": "false",
+    "SCHEDULER_OWNER": "none",
+    "RENDER_BASE_URL": ""
+  },
+  "observability": { "enabled": false }
+}

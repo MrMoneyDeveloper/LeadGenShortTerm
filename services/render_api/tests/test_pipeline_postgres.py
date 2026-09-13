@@ -62,6 +62,7 @@ def test_cursor_and_replay(postgres, monkeypatch):
     monkeypatch.setattr(pipeline, "validate_contact", lambda email: ("DELIVERABLE_DOMAIN", "syntax_and_mx_passed"))
     pipeline.validate_batch(5)
     pipeline.validate_batch(5)
+    pipeline.classify_batch(5)
     with postgres() as db:
         assert db.scalar(select(func.count()).select_from(Lead)) == 1
         assert db.scalar(select(func.count()).select_from(SourceRecord)) == 0
@@ -155,6 +156,9 @@ def test_retention_keeps_durable_lead_and_checkpoint_state(postgres):
         assert db.scalar(select(func.count()).select_from(Lead)) == 1
         assert db.get(Identity, identity_hash) is not None
         durable = {"record:" + "r" * 64, "content:" + "c" * 64, "email:" + email_hash, "lead:" + identity_hash}
+        # Unacknowledged final output protects its working candidate and claim by identity,
+        # including pre-migration leads that do not yet have candidate_id.
+        durable.add("candidate:" + identity_hash)
         assert set(db.scalars(select(Dedupe.key)).all()) == durable
-        assert db.scalar(select(func.count()).select_from(Candidate)) == 0
+        assert db.scalar(select(func.count()).select_from(Candidate)) == 1
         assert db.get(EmailValidation, "stale") is None

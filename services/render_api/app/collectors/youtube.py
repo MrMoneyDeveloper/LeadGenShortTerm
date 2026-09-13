@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from app.collectors.base import Batch, Record, SourceError
+from app.collectors.base import Batch, SourceError
+from app.collectors.profiles import youtube_profile
 from app.config import rules, settings
 from app.models import now
 from app.repositories import reserve
@@ -109,22 +110,12 @@ class YouTube:
                         params["pageToken"] = state["comment_page"]
                     data = fetch(client, "commentThreads", params)
                     for item in data.get("items", []):
-                        top = item["snippet"]["topLevelComment"]
-                        comment = top["snippet"]
                         result.scanned += 1
                         try:
-                            published = datetime.fromisoformat(comment["publishedAt"].replace("Z", "+00:00"))
-                        except (KeyError, ValueError):
+                            record = youtube_profile(item["snippet"]["topLevelComment"], video)
+                        except (KeyError, ValueError, TypeError):
                             continue
-                        result.records.append(
-                            Record(
-                                top["id"],
-                                comment.get("authorChannelId", {}).get("value", top["id"]),
-                                comment.get("textOriginal", comment.get("textDisplay", ""))[:16000],
-                                f"https://www.youtube.com/watch?v={video}&lc={top['id']}",
-                                published,
-                            )
-                        )
+                        result.records.append(record)
                     state["comment_page"] = data.get("nextPageToken", "")
                     if not state["comment_page"]:
                         state["videos"].pop(0)

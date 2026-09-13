@@ -106,3 +106,22 @@ def test_mocked_grok_retries_one_rate_limit_then_accounts_once(isolated_settings
     assert result.score == 91
     assert len(reservations) == 2
     assert accounting == [("grok", 100, 20, 0.00014)]
+
+
+def test_mocked_grok_prefers_exact_billed_cost_ticks(isolated_settings, monkeypatch):
+    configure(isolated_settings)
+    accounting = []
+
+    class BilledResponse(Response):
+        def json(self):
+            body = super().json()
+            body["usage"]["cost_in_usd_ticks"] = 1_234_567
+            return body
+
+    monkeypatch.setattr(grok, "reserve", lambda *args: True)
+    monkeypatch.setattr(grok, "account_tokens", lambda *args: accounting.append(args))
+    monkeypatch.setattr(grok.httpx, "Client", lambda **kwargs: Client(BilledResponse(json.dumps(payload())), []))
+
+    grok.classify("ambiguous insurance", 40)
+
+    assert accounting == [("grok", 100, 20, 0.0001234567)]

@@ -1,12 +1,13 @@
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
-from app.classifiers import grok, local
+from app.classifiers import grok, local, semantic
 from app.collectors import ADAPTERS
-from app.config import rules, settings
+from app.collectors.profiles import profile
+from app.config import settings
 from app.database import session
 from app.models import (
     Candidate,
@@ -23,8 +24,10 @@ from app.models import (
     now,
 )
 from app.qualification import digest, normalize, score
+from app.ranking import rank, semantic_qualified
 from app.repositories import claim_hashes, metric
 from app.validators import contacts, validate_contact
+from app.services import backpressure
 
 
 def collect(job):
@@ -46,6 +49,13 @@ def collect(job):
         limit = min(limit, max(0, cfg.max_pending_raw - pending))
         if not limit:
             return {"stop_reason": "raw_backlog_cap"}
+        pressure = backpressure.inspect(db)
+        if pressure["mode"] in {"storage_pressure", "drain", "campaign_complete"}:
+            return {"stop_reason": pressure["mode"]}
+        # Defense in depth for internal direct calls; HTTP/executor additionally enforce pause/flags.
+        limit = min(limit, max(0, cfg.queue_high_water - pressure["total_work_rows"]))
+        if not limit:
+            return {"stop_reason": "queue_high_water"}
         cursor = dict(source.cursor)
     batch = ADAPTERS[job.source]().collect(cursor, limit)
     # All accepted source rows, hashes, metrics and checkpoint commit together.
@@ -78,6 +88,7 @@ def collect(job):
                     identity_hash=identity_hash,
                     content_hash=content_hash,
                     text=text,
+                    profile=profile(record),
                     published_at=record.published_at,
                 )
             )
@@ -152,9 +163,10 @@ def normalize_batch(limit):
                 identity_hash=record.identity_hash,
                 excerpt=grok.redact(record.text),
                 contacts=found_contacts,
+                profile=record.profile,
                 product_type=result["product_type"],
                 score=result["score"],
-                status="VALIDATE" if result["confident"] else "CLASSIFY",
+                status="VALIDATE",
             )
             db.add(candidate)
             db.flush()
@@ -169,6 +181,50 @@ def normalize_batch(limit):
         return {"normalized": len(records)}
 
 
+def _reject(db, candidate):
+    metric(db, candidate.source, "rejected")
+    if candidate.record_id and settings().delete_rejected_immediately:
+        db.execute(delete(SourceRecord).where(SourceRecord.id == candidate.record_id))
+    db.execute(delete(Dedupe).where(Dedupe.key == "candidate:" + candidate.identity_hash))
+    db.delete(candidate)
+
+
+def _usable_contacts(candidate):
+    fresh = []
+    for contact in candidate.contacts:
+        try:
+            checked = datetime.fromisoformat(contact.get("validated_at", ""))
+            if checked.tzinfo and checked > now() - timedelta(days=3) and contact.get("status") == "DELIVERABLE_DOMAIN":
+                fresh.append(contact)
+        except (TypeError, ValueError):
+            pass
+    return fresh
+
+
+def _finalize(db, candidate):
+    # Model output never supplies or edits any of these contact/profile fields.
+    for contact in _usable_contacts(candidate):
+        email_hash = digest(contact["email"])
+        if not claim_hashes(db, ["email:" + email_hash, "lead:" + candidate.identity_hash]):
+            metric(db, candidate.source, "email_duplicates")
+            continue
+        db.add(Lead(
+            candidate_id=candidate.id, email=contact["email"], email_hash=email_hash,
+            identity_hash=candidate.identity_hash, source=candidate.source,
+            source_url=candidate.source_url, email_source_url=contact["source_url"],
+            excerpt=candidate.excerpt, product_type=candidate.product_type,
+            score=candidate.score, rank_score=candidate.rank_score, profile=candidate.profile,
+        ))
+        identity = db.get(Identity, candidate.identity_hash)
+        if identity:
+            identity.email_hash = email_hash
+        metric(db, candidate.source, "validated")
+        candidate.status, candidate.contacts = "VALIDATED", []
+        return True
+    _reject(db, candidate)
+    return False
+
+
 def classify_batch(limit):
     deadline = time.monotonic() + settings().job_seconds
     count = 0
@@ -177,74 +233,76 @@ def classify_batch(limit):
             candidate = db.scalar(
                 select(Candidate)
                 .where(Candidate.status == "CLASSIFY", Candidate.available_at <= now())
-                .order_by(Candidate.created_at)
+                .order_by(Candidate.rank_score.desc(), Candidate.score.desc(), Candidate.created_at)
                 .limit(1)
                 .with_for_update(skip_locked=True)
             )
             if not candidate:
                 break
-            result = db.scalar(
+            if not _usable_contacts(candidate):
+                # Older/retried candidates cannot bypass deterministic contact validation.
+                candidate.status, candidate.available_at = "VALIDATE", now()
+                count += 1
+                continue
+            classification = db.scalar(
                 select(Classification).where(
                     Classification.candidate_id == candidate.id, Classification.provider == "rules"
                 )
-            ).result
+            )
+            if not classification:
+                candidate.status = "REVIEW"
+                db.add(Failure(source=candidate.source, code="rules_result_missing"))
+                count += 1
+                continue
+            result = classification.result
             ml = local.classify(candidate.excerpt)
-            qualified = None
             if ml:
                 db.execute(
                     insert(Classification)
                     .values(candidate_id=candidate.id, provider="local", version=ml["version"], result=ml)
                     .on_conflict_do_nothing()
                 )
-                if ml["confidence"] >= rules("scoring")["local_confidence"]:
-                    if ml["label"] not in {"HIGH_INTENT", "MEDIUM_INTENT"}:
-                        qualified = False
-                    elif (
-                        not rules("scoring")["require_south_africa"] or "south_africa" in result["signals"]
-                    ) and candidate.product_type != "UNKNOWN":
-                        qualified = True
                 metric(db, candidate.source, "ml_classified")
-            if qualified is None:
+            ranked = rank(result, True, ml)
+            candidate.rank_score = ranked["rank_score"]
+            db.execute(insert(Classification).values(
+                candidate_id=candidate.id, provider="ranking", version=ranked["version"], result=ranked,
+            ).on_conflict_do_update(
+                index_elements=["candidate_id", "provider"], set_={"version": ranked["version"], "result": ranked},
+            ))
+            route = ranked["route"]
+            qualified = route == "DIRECT_FINAL"
+            if route == "SEMANTIC":
                 try:
-                    semantic = grok.classify(candidate.excerpt, candidate.score)
-                except grok.GrokUnavailable as exc:
+                    semantic_result = semantic.classify(candidate.excerpt, candidate.score)
+                except semantic.SemanticUnavailable as exc:
                     candidate.attempts += 1
                     candidate.available_at = now() + timedelta(hours=min(24, 2**candidate.attempts))
                     if candidate.attempts >= settings().job_max_attempts:
                         candidate.status = "REVIEW"
-                    metric(db, candidate.source, "grok_deferred")
+                    metric(db, candidate.source, semantic.provider() + "_deferred")
                     db.add(Failure(source=candidate.source, code=str(exc)))
                     count += 1
                     continue
                 db.add(
                     Classification(
                         candidate_id=candidate.id,
-                        provider="grok",
-                        version=settings().xai_model,
-                        result=semantic.model_dump(),
+                        provider=semantic.provider(),
+                        version=semantic.model(),
+                        result=semantic_result.model_dump(),
                     )
                 )
-                metric(db, candidate.source, "grok_classified")
-                qualified = (
-                    semantic.is_short_term_insurance_relevant
-                    and semantic.is_consumer
-                    and not semantic.is_advertisement
-                    and not semantic.is_broker_or_agent
-                    and semantic.intent_level in {"HIGH", "MEDIUM"}
-                    and semantic.product_type in {"MOTOR", "HOME", "CONTENTS"}
-                    and semantic.score >= rules("scoring")["discard_below"]
-                    and (semantic.south_africa_signal or not rules("scoring")["require_south_africa"])
-                )
-                candidate.score, candidate.product_type = semantic.score, semantic.product_type
+                metric(db, candidate.source, semantic.provider() + "_classified")
+                qualified = semantic_qualified(semantic_result)
+                # A semantic pass is a decision, never an automatic or calibrated 10/10.
+                candidate.score, candidate.product_type = semantic_result.score, semantic_result.product_type
             if qualified:
-                candidate.status, candidate.attempts = "VALIDATE", 0
-                candidate.available_at = now()
+                _finalize(db, candidate)
+            elif route == "DEFERRED":
+                candidate.status = "DEFERRED"
+                metric(db, candidate.source, "rank_deferred")
             else:
-                metric(db, candidate.source, "rejected")
-                if candidate.record_id and settings().delete_rejected_immediately:
-                    db.execute(delete(SourceRecord).where(SourceRecord.id == candidate.record_id))
-                db.execute(delete(Dedupe).where(Dedupe.key == "candidate:" + candidate.identity_hash))
-                db.delete(candidate)
+                _reject(db, candidate)
             count += 1
     return {"classified": count}
 
@@ -268,7 +326,7 @@ def validate_batch(limit):
                 metric(db, candidate.source, "no_contact")
                 count += 1
                 continue
-            temporary, accepted = False, False
+            temporary, accepted_contacts = False, []
             for contact in candidate.contacts:
                 email_hash = digest(contact["email"])
                 if db.get(Dedupe, "email:" + email_hash):
@@ -290,29 +348,17 @@ def validate_batch(limit):
                 temporary |= reason == "dns_temporary"
                 if status != "DELIVERABLE_DOMAIN":
                     continue
-                if not claim_hashes(db, ["email:" + email_hash, "lead:" + candidate.identity_hash]):
-                    continue
-                db.add(
-                    Lead(
-                        email=contact["email"],
-                        email_hash=email_hash,
-                        identity_hash=candidate.identity_hash,
-                        source=candidate.source,
-                        source_url=candidate.source_url,
-                        email_source_url=contact["source_url"],
-                        excerpt=candidate.excerpt,
-                        product_type=candidate.product_type,
-                        score=candidate.score,
-                    )
-                )
-                identity = db.get(Identity, candidate.identity_hash)
-                if identity:
-                    identity.email_hash = email_hash
-                metric(db, candidate.source, "validated")
-                candidate.status, candidate.contacts = "VALIDATED", []
-                accepted = True
-                break
-            if not accepted:
+                accepted_contacts.append({**contact, "status": status, "validated_at": now().isoformat()})
+            if accepted_contacts:
+                candidate.contacts = accepted_contacts
+                candidate.status, candidate.attempts, candidate.available_at = "CLASSIFY", 0, now()
+                classification = db.scalar(select(Classification).where(
+                    Classification.candidate_id == candidate.id, Classification.provider == "rules",
+                ))
+                if classification:
+                    candidate.rank_score = rank(classification.result, True)["rank_score"]
+                metric(db, candidate.source, "contacts_validated")
+            else:
                 if temporary and candidate.attempts < settings().job_max_attempts:
                     candidate.attempts += 1
                     candidate.available_at = now() + timedelta(minutes=2**candidate.attempts)
@@ -341,7 +387,10 @@ def cleanup(limit):
             db.execute(delete(SourceRecord).where(SourceRecord.id.in_(ids)))
         expired_candidates = db.scalars(
             select(Candidate)
-            .where(Candidate.created_at < now() - timedelta(days=cfg.candidate_retention_days))
+            .where(
+                Candidate.created_at < now() - timedelta(days=cfg.candidate_retention_days),
+                ~select(Lead.id).where(Lead.identity_hash == Candidate.identity_hash).exists(),
+            )
             .limit(limit)
         ).all()
         candidates = [c.id for c in expired_candidates]

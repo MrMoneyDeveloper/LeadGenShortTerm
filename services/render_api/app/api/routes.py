@@ -9,6 +9,7 @@ from app.api.auth import dashboard, operator
 from app.database import session
 from app.models import Candidate, Job, PipelineState, SourceCursor, now
 from app.services import reporting
+from app.services import backpressure, delivery
 
 router = APIRouter()
 
@@ -45,6 +46,55 @@ def source_stats():
 @router.get("/dashboard/queue", dependencies=[Depends(dashboard)])
 def queue():
     return reporting.queue()
+
+
+@router.get("/dashboard/backpressure", dependencies=[Depends(dashboard)])
+def pressure():
+    return backpressure.status()
+
+
+class ClaimRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    limit: int | None = Field(None, ge=1, le=200)
+
+
+class Placement(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    lead_id: int = Field(ge=1, le=9_007_199_254_740_991)
+    tab: str = Field(pattern=r"^VALIDATED_[0-9]{3,}$", max_length=40)
+    row: int = Field(ge=2, le=5001)
+
+
+class AckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    batch_id: str = Field(pattern=r"^[a-f0-9-]{36}$")
+    checksum: str = Field(pattern=r"^[a-f0-9]{64}$")
+    spreadsheet_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,160}$")
+    drive_folder_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,160}$")
+    drive_file_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,160}$")
+    drive_checksum: str = Field(pattern=r"^[a-f0-9]{64}$")
+    placements: list[Placement] = Field(min_length=1, max_length=200)
+
+
+@router.post("/exports/claim", dependencies=[Depends(operator)])
+def claim_export(body: ClaimRequest):
+    try:
+        return delivery.claim(body.limit)
+    except delivery.DeliveryError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@router.post("/exports/ack", dependencies=[Depends(operator)])
+def ack_export(body: AckRequest):
+    try:
+        return delivery.acknowledge(body.model_dump())
+    except delivery.DeliveryError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@router.get("/exports/history", dependencies=[Depends(dashboard)])
+def delivery_history(limit: int = Query(100, ge=1, le=200)):
+    return delivery.history(limit)
 
 
 @router.get("/dashboard/failures", dependencies=[Depends(dashboard)])

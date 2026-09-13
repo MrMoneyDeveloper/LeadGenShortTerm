@@ -10,6 +10,11 @@ class Record:
     text: str
     url: str
     published_at: datetime
+    display_name: str = ""
+    username: str = ""
+    business_name: str = ""
+    urls: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass

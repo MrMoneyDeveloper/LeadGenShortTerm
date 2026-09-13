@@ -43,6 +43,12 @@ class PipelineState(Base):
     __tablename__ = "pipeline_state"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     paused: Mapped[bool] = mapped_column(Boolean, default=True)
+    draining: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    storage_pressure: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    export_next_position: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    export_spreadsheet_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
+    export_folder_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
+    export_shard_rows: Mapped[int] = mapped_column(Integer, default=5000, server_default="5000")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -72,6 +78,7 @@ class SourceRecord(Base):
     identity_hash: Mapped[str] = mapped_column(String(64), index=True)
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     text: Mapped[str] = mapped_column(Text)
+    profile: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
     status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
@@ -101,9 +108,11 @@ class Candidate(Base):
     identity_hash: Mapped[str] = mapped_column(String(64), index=True)
     excerpt: Mapped[str] = mapped_column(String(2000))
     contacts: Mapped[list] = mapped_column(JSONB, default=list)
+    profile: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    rank_score: Mapped[float] = mapped_column(Float, default=0, server_default="0")
     product_type: Mapped[str] = mapped_column(String(24))
     score: Mapped[int] = mapped_column(Integer, index=True)
-    status: Mapped[str] = mapped_column(String(32), default="CLASSIFY", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="VALIDATE", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
@@ -131,6 +140,9 @@ class EmailValidation(Base):
 class Lead(Base):
     __tablename__ = "validated_leads"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("candidates.id", ondelete="SET NULL"), index=True)
+    profile: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    rank_score: Mapped[float] = mapped_column(Float, default=0, server_default="0")
     email: Mapped[str] = mapped_column(String(320))
     email_hash: Mapped[str] = mapped_column(String(64), unique=True)
     identity_hash: Mapped[str] = mapped_column(String(64), unique=True)
@@ -172,5 +184,26 @@ class Failure(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
+class ExportBatch(Base):
+    """Immutable delivery until ACK; then retain only a compact receipt, never lead payloads."""
+
+    __tablename__ = "export_batches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    campaign_id: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(24), default="CLAIMED", index=True)
+    spreadsheet_id: Mapped[str] = mapped_column(String(160))
+    drive_folder_id: Mapped[str] = mapped_column(String(160))
+    checksum: Mapped[str] = mapped_column(String(64))
+    fields: Mapped[list] = mapped_column(JSONB, default=list)
+    items: Mapped[list] = mapped_column(JSONB, default=list)
+    count: Mapped[int] = mapped_column(Integer)
+    first_position: Mapped[int] = mapped_column(BigInteger)
+    drive_file_id: Mapped[str | None] = mapped_column(String(160))
+    ack_digest: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 Index("ix_jobs_claim", Job.status, Job.available_at)
 Index("ix_candidates_stage_due", Candidate.status, Candidate.available_at)
+Index("ix_candidates_priority", Candidate.status, Candidate.rank_score.desc(), Candidate.available_at)

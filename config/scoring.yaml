@@ -18,3 +18,15 @@ local_confidence: 0.85
 max_age_days: 30
 require_south_africa: true
 negative_signals: [broker, job, advertisement, news]
+ranking:
+  version: ordinal-rank-v1
+  # These are configurable operating thresholds, not measured probabilities.
+  rules_weight: 0.7
+  contact_points: 1.0
+  product_points: 1.0
+  geography_points: 1.0
+  local_positive_bonus: 0.5
+  defer_at: 6.0
+  semantic_at: 8.0
+  direct_at: 9.5
+  semantic_accept_score: 80

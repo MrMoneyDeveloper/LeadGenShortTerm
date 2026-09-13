@@ -84,7 +84,16 @@ def classify(text, score):
                 data = response.json()
                 usage = data.get("usage", {})
                 incoming, outgoing = usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
-                cost = (incoming * cfg.grok_input_usd_per_million + outgoing * cfg.grok_output_usd_per_million) / 1e6
+                billed_ticks = usage.get("cost_in_usd_ticks")
+                if isinstance(billed_ticks, (int, float)) and not isinstance(billed_ticks, bool) and billed_ticks >= 0:
+                    # xAI reports the exact billed amount in 10^-10 USD ticks. This includes
+                    # prompt-cache discounts and is preferable to a configured estimate.
+                    cost = billed_ticks / 10_000_000_000
+                else:
+                    cost = (
+                        incoming * cfg.grok_input_usd_per_million
+                        + outgoing * cfg.grok_output_usd_per_million
+                    ) / 1e6
                 account_tokens("grok", incoming, outgoing, cost)
                 choice = data["choices"][0]
                 if choice.get("finish_reason") != "stop":

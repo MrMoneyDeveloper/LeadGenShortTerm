@@ -8,9 +8,10 @@ from sqlalchemy.dialects.postgresql import insert
 from app.collectors.base import SourceError
 from app.config import rules, settings
 from app.database import advisory_lock, session
-from app.models import Failure, Job, PipelineState, SourceCursor, now
+from app.models import Candidate, Failure, Job, PipelineState, SourceCursor, SourceRecord, now
 from app.repositories import metric
 from app.services import pipeline
+from app.services import backpressure
 
 KINDS = ("collect", "normalize", "classify", "validate", "cleanup")
 logger = logging.getLogger("leadgen.jobs")
@@ -30,10 +31,15 @@ def permitted(db, kind, source=None):
     state = db.get(PipelineState, 1)
     if state is None or state.paused:
         return False
+    pressure = backpressure.inspect(db)
+    if pressure["mode"] == "storage_pressure":
+        return False
     if kind == "collect":
         row = db.get(SourceCursor, source)
         return bool(
-            cfg.acquisition_enabled
+            pressure["mode"] == "collect"
+            and pressure["collect_allowance"] > 0
+            and cfg.acquisition_enabled
             and getattr(cfg, source + "_enabled", False)
             and rules("sources").get(source, {}).get("enabled", False)
             and row
@@ -78,6 +84,9 @@ def run_next():
             jobs = db.scalars(
                 select(Job).where(Job.status == "QUEUED", Job.available_at <= now()).order_by(Job.created_at).limit(100)
             ).all()
+            # Drain/cleanup before new raw input, even when old collect jobs were queued first.
+            priority = {"validate": 0, "classify": 1, "normalize": 2, "cleanup": 3, "collect": 4}
+            jobs.sort(key=lambda j: (priority.get(j.kind, 9), j.created_at))
             job = next((j for j in jobs if permitted(db, j.kind, j.source)), None)
             if job is None:
                 return {"status": "idle"}
@@ -129,14 +138,26 @@ def schedule_tick():
     cfg = settings()
     bucket = int(now().timestamp()) // cfg.scheduler_interval_seconds
     for kind, source in [
+        ("cleanup", None),
+        ("normalize", None),
+        ("validate", None),
+        ("classify", None),
         ("collect", "bluesky"),
         ("collect", "youtube"),
-        ("normalize", None),
-        ("classify", None),
-        ("validate", None),
-        ("cleanup", None),
     ]:
         with session() as db:
+            if kind == "normalize" and not db.scalar(select(SourceRecord.id).where(SourceRecord.status == "PENDING").limit(1)):
+                continue
+            if kind in {"validate", "classify"} and not db.scalar(select(Candidate.id).where(
+                Candidate.status == kind.upper(), Candidate.available_at <= now()
+            ).limit(1)):
+                continue
+            if kind == "cleanup":
+                recent_cleanup = db.scalar(select(Job.id).where(
+                    Job.kind == "cleanup", Job.created_at > now() - timedelta(seconds=cfg.scheduler_interval_seconds * 10)
+                ).limit(1))
+                if recent_cleanup:
+                    continue
             pending = db.scalar(
                 select(Job.id)
                 .where(Job.kind == kind, Job.source == source, Job.status.in_(["QUEUED", "RUNNING"]))
