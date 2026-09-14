@@ -7,7 +7,7 @@ import httpx
 
 from app.classifiers.grok import SemanticResult, redact
 from app.config import settings
-from app.repositories import account_tokens, reserve
+from app.repositories import account_tokens, reserve_budget
 
 
 class GroqUnavailable(Exception):
@@ -40,8 +40,16 @@ def classify(text, score):
         payload["reasoning_effort"] = "low"
     with httpx.Client(timeout=cfg.semantic_timeout_seconds) as client:
         for attempt in range(cfg.semantic_max_attempts):
-            if not reserve("groq", 1, cfg.groq_daily_candidate_cap):
-                raise GroqUnavailable("groq_daily_cap")
+            budget = reserve_budget(
+                "groq",
+                1,
+                cfg.groq_daily_request_soft_cap,
+                cfg.groq_daily_token_soft_cap,
+            )
+            if budget == "unit_cap":
+                raise GroqUnavailable("groq_daily_request_cap")
+            if budget == "token_cap":
+                raise GroqUnavailable("groq_daily_token_cap")
             try:
                 response = client.post(
                     "https://api.groq.com/openai/v1/chat/completions", json=payload,
