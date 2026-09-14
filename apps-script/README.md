@@ -16,26 +16,31 @@ using the ignored local configuration; never place secrets in source code or She
 | `GOOGLE_DRIVE_BACKUP_FOLDER_ID` | Test folder; must match Render's configured ID |
 | `PROCESSOR_TRIGGER_TOKEN` | Operator bearer token for claim/ACK and manual controls |
 | `DASHBOARD_API_TOKEN` | Read token for dashboard and operational statistics |
-| `PROCESSOR_SCHEDULE_ENABLED` | Keep `false` throughout controlled testing |
-| `DASHBOARD_ENABLED` / `BACKUPS_ENABLED` | Scheduled-wrapper gates; keep `false` during testing |
+| `DELIVERY_ENABLED` | Exactly `true` permits `deliveryTick` and delivery-trigger installation |
+| `PROCESSOR_SCHEDULE_ENABLED` | Keep `false` when Cloudflare owns processing orchestration |
+| `DASHBOARD_ENABLED` / `BACKUPS_ENABLED` | Gates for their installed scheduled wrappers |
 
 Google runs `SpreadsheetApp` and `DriveApp` under the account that authorizes this project. No
 Google API key or service account is required. Keep the project and output resources private.
 No triggers are installed by loading or manually executing these files.
 
-## Manual functions
+## Manual functions and trigger helpers
 
 | Function | Purpose |
 |---|---|
 | `deliverFinalLeads()` | Claim and deliver at most 200 finished leads, or recover the previous ACK |
+| `deliveryTick()` | Gated wrapper around one `deliverFinalLeads()` call |
+| `installDeliveryTrigger()` | Explicitly install a five-minute delivery trigger; requires `DELIVERY_ENABLED=true` |
 | `refreshDashboard()` | Replace small SUMMARY, SOURCE_STATS, PROCESSING and FAILED value tables |
 | `dailyBackup()` | Start/resume a daily snapshot of final Sheet shards plus operational statistics |
-| `pausePipeline()` / `resumePipeline()` | Authenticated controls; environment and source gates still apply |
-| `processorTick()` | Gated bounded tick request; no direct processing in Apps Script |
-| `removeLeadgenTriggers()` | Remove only this solution's named triggers |
+| `pausePipeline()` / `resumePipeline()` | Authenticated controls; environment/source/campaign gates still apply |
+| `processorTick()` | Gated bounded Render tick; keep disabled when Cloudflare is scheduler owner |
+| `installReportingTriggers()` | Explicitly install dashboard + backup triggers only |
+| `installProcessorTrigger()` | Explicit legacy/fallback processing trigger; not used with Cloudflare ownership |
+| `removeLeadgenTriggers()` | Remove processor, delivery, dashboard and backup handlers |
 
-`installReportingTriggers()` and `installProcessorTrigger()` are explicit future setup helpers.
-Do not invoke them in this phase. There is no outbound email implementation.
+Phase 2 may exercise these functions manually or with isolated test triggers. Do not install final
+production triggers until the live runtime gates pass. There is no outbound email implementation.
 
 ## Delivery protocol
 
@@ -48,8 +53,8 @@ calculates a placement or assumes row 5,001 is the boundary.
 1. Validate destination IDs, stable lead IDs, placement bounds and the batch SHA-256 checksum.
 2. Read all destination rows. Empty rows and exact matches are safe; a conflicting row or formula
    stops the batch. Final tabs are never cleared, sorted, or replaced by the dashboard.
-3. Write literal rich text, flush Sheets and read back all values. This preserves strings such as
-   phone numbers and prevents `=`, `+`, `-`, or `@` text from becoming spreadsheet formulas.
+3. Write literal rich text, flush Sheets and read back all values. This prevents values beginning
+   with formula characters from executing as spreadsheet formulas.
 4. Create/reuse an immutable JSON delivery envelope and CSV in the configured Drive folder.
    Reread the JSON and verify its `items` checksum. CSV independently escapes formula prefixes.
 5. Save only batch/file/checksum references in `DELIVERY_STATE`, record `EXPORT_INDEX`, then
@@ -69,15 +74,15 @@ Personal lead fields are never stored in Script Properties or status logs.
 
 Do not manually edit, sort or delete final-shard rows during delivery. Use a separate analysis
 copy for sorting. Render's persisted destination positions must continue to identify the same rows.
-The legacy `VALIDATED` sample tab is left untouched and is not part of the final dataset.
+The legacy `VALIDATED` sample tab is not part of the final dataset.
 
 ## Daily backups
 
 Postgres may already have drained accepted leads, so `dailyBackup()` reads the final Sheet shards.
 It pins each shard's last row when starting the snapshot, writes up to 1,000 records per CSV part,
-and checkpoints between parts within a 180-second work window. Reinvoke it manually to continue.
-Newly delivered rows after the snapshot boundary appear in the next day's backup; their individual
-delivery JSON/CSV files already protect them immediately before ACK.
+and checkpoints between parts within a 180-second work window. Reinvoke it or let an approved backup
+trigger continue later. Newly delivered rows after the snapshot boundary appear in the next day's
+backup; their per-delivery JSON/CSV files already protect them immediately before ACK.
 
 ```text
 lead-delivery-<hash-of-batch-id>.json
@@ -104,12 +109,12 @@ campaign ID alone must not reset placements in an existing workbook.
 ## Local evidence and remaining live gate
 
 `node tests/apps_script_harness.cjs` executes the actual functions against offline Sheets,
-Drive, properties and Render mocks. It covers checksum/literal preservation, shard rollover
-including a non-default capacity, conflicting rows, ACK rejection and lost response, crashes
-after Sheet/Drive writes, repeat dashboard/daily export, paginated CSVs and manifest/history recovery.
-The Python automated suite invokes the same harness.
+Drive, properties and Render mocks. It covers checksum/literal preservation, shard rollover,
+conflicting rows, ACK rejection/lost response, crashes after Sheet/Drive writes, repeat dashboard
+and daily export, paginated CSVs and manifest/history recovery. The Python suite invokes the same
+harness.
 
-These checks do not prove Google authorization, quotas, latency or Apps Script runtime behavior.
-The controlled Phase-2 integration gate must still execute delivery and backup against the isolated
-test Sheet/folder, run each twice, verify final rows/files and the server's deletion after ACK, and
-confirm that no production triggers exist. Do not claim live Google success from the offline harness.
+Offline checks do not prove Google authorization, quotas, latency, trigger scheduling or Apps Script
+runtime behavior. The controlled Phase-2 integration gate must still execute delivery and backup
+against the isolated test Sheet/folder, verify final rows/files and server deletion after ACK, then
+prove the bounded `deliveryTick` can run independently with the local development machine stopped.
