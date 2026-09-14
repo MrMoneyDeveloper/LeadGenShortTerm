@@ -45,6 +45,17 @@ class PipelineState(Base):
     paused: Mapped[bool] = mapped_column(Boolean, default=True)
     draining: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     storage_pressure: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+    # Persist the campaign clock/state so the seven-day run survives Render sleep/restarts.
+    campaign_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    campaign_status: Mapped[str] = mapped_column(String(24), default="READY", server_default="READY")
+    campaign_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    campaign_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    campaign_raw_target: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    campaign_raw_scanned: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    campaign_last_progress_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    campaign_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     export_next_position: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     export_spreadsheet_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
     export_folder_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
