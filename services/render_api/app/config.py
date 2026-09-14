@@ -48,12 +48,19 @@ class Settings(BaseSettings):
     # Default semantic provider: GroqCloud free tier. xAI/Grok remains an explicit legacy option.
     semantic_provider: Literal["groq", "xai"] = "groq"
     groq_enabled: bool = False
-    groq_api_key: SecretStr = SecretStr("")
+    # Temporary migration alias lets an existing gsk_ value stored under XAI_API_KEY be tested
+    # without another rotation. GROQ_API_KEY is canonical and wins when both are present.
+    groq_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("GROQ_API_KEY", "XAI_API_KEY", "groq_api_key"),
+    )
     groq_model: str = ""
     groq_daily_request_soft_cap: int = Field(
         800,
         ge=0,
-        validation_alias=AliasChoices("GROQ_DAILY_REQUEST_SOFT_CAP", "GROQ_DAILY_CANDIDATE_CAP"),
+        validation_alias=AliasChoices(
+            "GROQ_DAILY_REQUEST_SOFT_CAP", "GROQ_DAILY_CANDIDATE_CAP", "groq_daily_request_soft_cap"
+        ),
     )
     groq_daily_token_soft_cap: int = Field(150_000, ge=0)
     groq_input_usd_per_million: float = Field(0, ge=0)
