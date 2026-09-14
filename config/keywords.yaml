@@ -1,17 +1,218 @@
-relevance_terms: [insurance]
+relevance_terms:
+  - insurance
+  - short term insurance
+  - short-term insurance
+  - insure
+  - insured
+  - premium
+
 products:
-  MOTOR: [motor insurance, car insurance, vehicle insurance, vehicle cover]
-  HOME: [home insurance, house insurance, building insurance]
-  CONTENTS: [household insurance, contents insurance]
+  MOTOR:
+    - motor insurance
+    - car insurance
+    - vehicle insurance
+    - auto insurance
+    - car cover
+    - vehicle cover
+    - motor cover
+    - insure my car
+    - insure my vehicle
+    - insurance for my car
+    - insurance for my vehicle
+    - bakkie insurance
+    - bakkie cover
+  HOME:
+    - home insurance
+    - house insurance
+    - building insurance
+    - property insurance
+    - home cover
+    - house cover
+    - building cover
+    - insure my house
+    - insurance for my house
+    - homeowner insurance
+    - homeowners insurance
+  CONTENTS:
+    - contents insurance
+    - household contents
+    - home contents
+    - contents cover
+    - household insurance
+    - belongings insurance
+    - insure my belongings
+
 signals:
-  quote: [looking for insurance, need insurance, insurance quote, need a quote, want a quote]
-  recommendation: [recommend insurance, insurance recommendations, who should I insure with]
-  switch: [switch insurance, changing insurer, switch insurer]
-  premium: [premium increased, too expensive, cheaper insurance]
-  vehicle: [new car, bought a car, first car, financed car]
-  south_africa: [south africa, johannesburg, cape town, durban, pretoria, gauteng, mzansi]
-  insurer: [outsurance, discovery insure, king price, santam, miway, budget insurance, auto & general]
-  broker: [insurance broker, insurance agent, i sell insurance, contact me for insurance]
-  job: [insurance vacancy, insurance job, hiring, insurance careers]
-  advertisement: [advertisement, sponsored content, sponsored, get your quote today]
-  news: [press release, insurance news]
+  quote:
+    - looking for insurance
+    - looking for car insurance
+    - looking for vehicle insurance
+    - looking for home insurance
+    - need insurance
+    - need car insurance
+    - need vehicle insurance
+    - need motor insurance
+    - need home insurance
+    - need house insurance
+    - need cover
+    - need car cover
+    - need vehicle cover
+    - need home cover
+    - insurance quote
+    - quote for insurance
+    - quote for car insurance
+    - quote for vehicle insurance
+    - quote for home insurance
+    - need a quote
+    - want a quote
+  recommendation:
+    - recommend insurance
+    - recommend an insurer
+    - recommend insurer
+    - insurance recommendations
+    - can anyone recommend insurance
+    - can anyone recommend an insurer
+    - which insurer
+    - best insurer
+    - best car insurance
+    - best vehicle insurance
+    - who should i insure with
+    - who do you use for insurance
+  switch:
+    - switch insurance
+    - switch insurer
+    - switching insurance
+    - switching insurer
+    - changing insurance
+    - changing insurer
+    - move insurance
+    - move insurers
+    - leave my insurer
+    - cancel my insurance
+    - looking to move insurers
+  premium:
+    - premium increased
+    - premium increase
+    - premium went up
+    - premium keeps increasing
+    - insurance too expensive
+    - too expensive
+    - cheaper insurance
+    - cheaper insurer
+    - renewal increased
+    - renewal went up
+    - renewal too expensive
+    - renewal premium
+    - price increase
+  vehicle:
+    - new car
+    - bought a car
+    - buying a car
+    - getting a car
+    - first car
+    - financed car
+    - finance car
+    - vehicle finance
+    - car finance
+    - bought a bakkie
+    - buying a bakkie
+  property:
+    - new house
+    - new home
+    - bought a house
+    - buying a house
+    - bought a home
+    - buying a home
+    - moving house
+    - home loan
+    - bond approved
+  south_africa:
+    - south africa
+    - south african
+    - za
+    - zar
+    - rand
+    - rands
+    - johannesburg
+    - joburg
+    - cape town
+    - durban
+    - pretoria
+    - gauteng
+    - kwazulu-natal
+    - kwa-zulu natal
+    - kzn
+    - western cape
+    - eastern cape
+    - free state
+    - mpumalanga
+    - limpopo
+    - north west
+    - northern cape
+    - umhlanga
+    - ballito
+    - mzansi
+  insurer:
+    - outsurance
+    - discovery insure
+    - king price
+    - santam
+    - miway
+    - budget insurance
+    - auto & general
+    - hollard
+    - old mutual insure
+    - momentum insure
+    - naked insurance
+  broker:
+    - insurance broker
+    - insurance brokerage
+    - insurance agent
+    - financial adviser
+    - financial advisor
+    - registered broker
+    - i sell insurance
+    - we sell insurance
+    - we offer insurance
+    - contact me for insurance
+    - contact our brokerage
+  job:
+    - insurance vacancy
+    - insurance vacancies
+    - insurance job
+    - insurance jobs
+    - hiring insurance
+    - hiring insurance agents
+    - insurance careers
+    - insurance internship
+    - broker vacancy
+    - sales agent vacancy
+    - insurance recruitment
+  advertisement:
+    - advertisement
+    - sponsored content
+    - sponsored
+    - promotion
+    - limited offer
+    - get your quote today
+    - contact us for a quote
+  news:
+    - press release
+    - insurance news
+    - annual report
+    - earnings report
+    - industry report
+    - research paper
+    - insurance regulation
+  non_target:
+    - life insurance
+    - funeral cover
+    - funeral insurance
+    - medical aid
+    - health insurance
+    - gap cover
+    - retirement annuity
+    - pension fund
+    - retirement fund
+    - investment product
+    - investment policy
