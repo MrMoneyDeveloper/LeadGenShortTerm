@@ -78,5 +78,7 @@ function exportHistory_(state, status, url) {
   const dates = n > 1 ? tab.getRange(2, 1, n - 1, 1).getDisplayValues() : [];
   const index = dates.findIndex(r => r[0] === state.date);
   const row = [state.date, status, url || '', state.part - 1, new Date().toISOString()].map(safeCell_);
-  tab.getRange(index >= 0 ? index + 2 : n + 1, 1, 1, row.length).setValues([row]);
+  const destination = index >= 0 ? index + 2 : n + 1;
+  ensureGrid_(tab, destination, row.length);
+  tab.getRange(destination, 1, 1, row.length).setValues([row]);
 }

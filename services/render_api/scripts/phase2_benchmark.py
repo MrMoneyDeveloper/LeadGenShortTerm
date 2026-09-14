@@ -15,10 +15,11 @@ import psutil
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
+from app import jobs
 from app.config import settings
-from app.models import Candidate, Lead, SourceRecord
+from app.models import Candidate, ExportBatch, Lead, SourceRecord
 from app.qualification import digest
-from app.services import pipeline
+from app.services import delivery, pipeline
 
 
 def relation_bytes(db):
@@ -40,20 +41,26 @@ def main():
     cfg = settings()
     url = cfg.database_url.get_secret_value()
     parsed = urlparse(url.replace("postgresql+psycopg", "postgresql", 1))
-    count = int(os.environ.get("PHASE2_BENCHMARK_RECORDS", "1800"))
+    count = int(os.environ.get("PHASE2_BENCHMARK_RECORDS", "200"))
     if cfg.environment != "test":
         raise SystemExit("Refusing benchmark unless ENVIRONMENT=test")
     if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
         raise SystemExit("Refusing benchmark against a non-loopback database")
     if not parsed.path.lstrip("/").startswith("leadgen_phase2_perf"):
         raise SystemExit("Refusing benchmark outside a leadgen_phase2_perf database")
-    if not 100 <= count <= 5000:
-        raise SystemExit("PHASE2_BENCHMARK_RECORDS must be between 100 and 5000")
+    if not 100 <= count <= 600:
+        raise SystemExit("PHASE2_BENCHMARK_RECORDS must be between 100 and 600")
+    if any((cfg.acquisition_enabled, cfg.processing_enabled, cfg.scheduler_enabled,
+            cfg.groq_enabled, cfg.grok_enabled, cfg.local_model_path)):
+        raise SystemExit("Disable acquisition, processing, schedulers and all model providers first")
 
     engine = create_engine(url, hide_parameters=True)
     process = psutil.Process()
     with Session(engine) as db:
+        if any(db.scalar(select(func.count()).select_from(table)) for table in (SourceRecord, Candidate, Lead, ExportBatch)):
+            raise SystemExit("Benchmark requires a fresh disposable database")
         baseline = relation_bytes(db)
+    jobs.initialize()
     rss_before = process.memory_info().rss
     cpu_before = sum(process.cpu_times()[:2])
     inserted_at = datetime.now(UTC)
@@ -80,22 +87,36 @@ def main():
         raw_bytes = relation_bytes(db)
 
     original_validator = pipeline.validate_contact
+    original_semantic = pipeline.semantic.classify
     pipeline.validate_contact = lambda email: ("DELIVERABLE_DOMAIN", "controlled_fixture")
+    def deny_semantic(*args):
+        raise RuntimeError("Benchmark must never call an external model")
+    pipeline.semantic.classify = deny_semantic
+    stages = {}
     try:
         processing_started = time.perf_counter()
+        stage_started = time.perf_counter()
         remaining = count
         while remaining:
             result = pipeline.normalize_batch(min(cfg.processing_batch_size, remaining))
             if not result["normalized"]:
                 break
             remaining -= result["normalized"]
+        stages["normalize"] = time.perf_counter() - stage_started
+        stage_started = time.perf_counter()
         while True:
             result = pipeline.validate_batch(cfg.processing_batch_size)
             if not result["validated_checked"]:
                 break
+        stages["validate_fixture_dns"] = time.perf_counter() - stage_started
+        stage_started = time.perf_counter()
+        while pipeline.classify_batch(cfg.processing_batch_size)["classified"]:
+            pass
+        stages["rank_classify"] = time.perf_counter() - stage_started
         processing_seconds = time.perf_counter() - processing_started
     finally:
         pipeline.validate_contact = original_validator
+        pipeline.semantic.classify = original_semantic
 
     cpu_after = sum(process.cpu_times()[:2])
     rss_after = process.memory_info().rss
@@ -104,8 +125,33 @@ def main():
         leads = db.scalar(select(func.count()).select_from(Lead))
         candidates = db.scalar(select(func.count()).select_from(Candidate))
         raw_remaining = db.scalar(select(func.count()).select_from(SourceRecord))
+    cfg.final_delivery_enabled = True
+    cfg.google_spreadsheet_id, cfg.google_drive_backup_folder_id = "benchmark_sheet", "benchmark_folder"
+    delivery_started = time.perf_counter()
+    delivered = 0
+    while True:
+        batch = delivery.claim()
+        if batch["status"] == "empty":
+            break
+        # Local protocol benchmark only: no Google writes are claimed or performed.
+        delivery.acknowledge({
+            "batch_id": batch["batch_id"], "checksum": batch["checksum"],
+            "spreadsheet_id": batch["spreadsheet_id"], "drive_folder_id": batch["drive_folder_id"],
+            "drive_file_id": "simulated_benchmark_receipt", "drive_checksum": batch["checksum"],
+            "placements": [{k: item[k] for k in ("lead_id", "tab", "row")} for item in batch["items"]],
+        })
+        delivered += len(batch["items"])
+    stages["claim_simulated_ack"] = time.perf_counter() - delivery_started
+    with Session(engine) as db:
+        drained_bytes = relation_bytes(db)
+        remaining_payloads = sum(db.scalar(select(func.count()).select_from(t)) for t in (Lead, Candidate, SourceRecord))
     result = {
         "records": count,
+        "stage_seconds": {k: round(v, 4) for k, v in stages.items()},
+        "delivered_simulated": delivered,
+        "remaining_payloads": remaining_payloads,
+        "relation_after_ack_bytes": drained_bytes,
+        "google_runtime_measured": False,
         "insert_seconds": round(insert_seconds, 4),
         "processing_seconds": round(processing_seconds, 4),
         "records_per_second": round(count / processing_seconds, 2),

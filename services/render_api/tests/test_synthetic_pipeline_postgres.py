@@ -61,7 +61,7 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
         (
             12,
             "no-mx",
-            "Need a quote for contents insurance Pretoria, premium increased, changing insurer. person@nomx.test",
+            "Need a quote for contents insurance Pretoria, premium increased, changing insurer. person@nomx.example.net",
         ),
         (13, "irrelevant", "Lovely weather and football today"),
         (14, "ambiguous", "Car insurance in Durban is too expensive, any thoughts? ambiguous@example.org"),
@@ -89,7 +89,7 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
         pipeline,
         "validate_contact",
         lambda email: (
-            ("NO_MX", "no_mx") if email.endswith("@nomx.test") else ("DELIVERABLE_DOMAIN", "syntax_and_mx_passed")
+            ("NO_MX", "no_mx") if email.endswith("@nomx.example.net") else ("DELIVERABLE_DOMAIN", "syntax_and_mx_passed")
         ),
     )
 

@@ -8,7 +8,7 @@ function sha(text) { return crypto.createHash('sha256').update(text, 'utf8').dig
 function iterator(items) { return {hasNext: () => items.length > 0, next: () => items.shift()}; }
 function fixture(items) {
   const batch = {batch_id: 'batch-1', campaign_id: 'phase2', spreadsheet_id: 'sheet-test', drive_folder_id: 'folder-test',
-    fields: ['lead_id', 'email', 'display_name'], status: 'CLAIMED', items: items || [
+    fields: ['lead_id', 'email', 'display_name'], shard_rows: 5000, status: 'CLAIMED', items: items || [
       {lead_id: 1, tab: 'VALIDATED_001', row: 2, values: ['phase2:1', 'one@example.test', '=literal, "name"']},
       {lead_id: 2, tab: 'VALIDATED_001', row: 3, values: ['phase2:2', 'two@example.test', 'Zoë 😀']}
     ]};
@@ -141,6 +141,34 @@ test('rollover writes 5000th and 5001st records into separate shards', () => {
   e.context.deliverFinalLeads();
   assert.equal(e.sheets.get('VALIDATED_001').values[5000][0], 'phase2:5000');
   assert.equal(e.sheets.get('VALIDATED_002').values[1][0], 'phase2:5001');
+});
+test('server-pinned shard size controls rollover and rejects out-of-bounds rows', () => {
+  const batch = fixture([
+    {lead_id: 3, tab: 'VALIDATED_001', row: 4, values: ['phase2:3', 'a@example.test', 'A']},
+    {lead_id: 4, tab: 'VALIDATED_002', row: 2, values: ['phase2:4', 'b@example.test', 'B']}
+  ]);
+  batch.shard_rows = 3;
+  const e = environment(batch); e.context.deliverFinalLeads();
+  assert.equal(e.sheets.get('VALIDATED_001').values[3][0], 'phase2:3');
+  assert.equal(e.sheets.get('VALIDATED_002').values[1][0], 'phase2:4');
+  assert.equal(JSON.parse(e.files.find(file => file.name.endsWith('.json')).content).shard_rows, 3);
+  const invalid = fixture([{lead_id: 4, tab: 'VALIDATED_001', row: 5, values: ['phase2:4', 'x@example.test', 'X']}]);
+  invalid.shard_rows = 3;
+  const rejected = environment(invalid);
+  assert.throws(() => rejected.context.deliverFinalLeads(), /DELIVERY_PLACEMENT_INVALID/);
+  assert.equal(rejected.stats().acks, 0);
+});
+test('source names and evidence follow the server field schema without fabrication', () => {
+  const batch = fixture();
+  batch.fields.push('first_name', 'salutation', 'source_evidence');
+  batch.items[0].values.push('Zoë', 'Hi Zoë', 'Public display name: Zoë');
+  batch.items[1].values.push('', 'Hello', 'No reliable first name');
+  batch.checksum = sha(JSON.stringify(batch.items));
+  const e = environment(batch); e.context.deliverFinalLeads();
+  assert.deepEqual(JSON.parse(JSON.stringify(e.sheets.get('VALIDATED_001').values[0])), batch.fields);
+  assert.equal(e.sheets.get('VALIDATED_001').values[1][3], 'Zoë');
+  assert.equal(e.sheets.get('VALIDATED_001').values[2][3], '');
+  assert.equal(e.sheets.get('VALIDATED_001').values[2][4], 'Hello');
 });
 test('conflicting existing row or checksum prevents ACK', () => {
   const e = environment(); const tab = e.tab('VALIDATED_001');

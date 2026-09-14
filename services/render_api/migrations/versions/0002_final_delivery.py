@@ -1,7 +1,7 @@
 """Transient processing, source profiles and acknowledged final Google delivery."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0002_final_delivery"
@@ -37,6 +37,7 @@ def upgrade():
         sa.Column("items", postgresql.JSONB(), nullable=False),
         sa.Column("count", sa.Integer(), nullable=False),
         sa.Column("first_position", sa.BigInteger(), nullable=False),
+        sa.Column("shard_rows", sa.Integer(), nullable=False),
         sa.Column("drive_file_id", sa.String(160), nullable=True),
         sa.Column("ack_digest", sa.String(64), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

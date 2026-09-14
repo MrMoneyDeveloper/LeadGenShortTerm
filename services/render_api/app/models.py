@@ -198,6 +198,7 @@ class ExportBatch(Base):
     items: Mapped[list] = mapped_column(JSONB, default=list)
     count: Mapped[int] = mapped_column(Integer)
     first_position: Mapped[int] = mapped_column(BigInteger)
+    shard_rows: Mapped[int] = mapped_column(Integer)
     drive_file_id: Mapped[str | None] = mapped_column(String(160))
     ack_digest: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)

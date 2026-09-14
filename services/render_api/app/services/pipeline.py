@@ -1,7 +1,7 @@
 import time
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.classifiers import grok, local, semantic
@@ -26,8 +26,8 @@ from app.models import (
 from app.qualification import digest, normalize, score
 from app.ranking import rank, semantic_qualified
 from app.repositories import claim_hashes, metric
-from app.validators import contacts, validate_contact
 from app.services import backpressure
+from app.validators import contacts, validate_contact
 
 
 def collect(job):
@@ -189,6 +189,10 @@ def _reject(db, candidate):
     db.delete(candidate)
 
 
+def _terminal(candidate, status):
+    candidate.status, candidate.available_at = status, now()
+
+
 def _usable_contacts(candidate):
     fresh = []
     for contact in candidate.contacts:
@@ -244,13 +248,30 @@ def classify_batch(limit):
                 candidate.status, candidate.available_at = "VALIDATE", now()
                 count += 1
                 continue
+            if db.get(Dedupe, "lead:" + candidate.identity_hash):
+                metric(db, candidate.source, "identity_duplicates")
+                _reject(db, candidate)
+                count += 1
+                continue
+            fresh_contacts = [
+                contact for contact in _usable_contacts(candidate)
+                if not db.get(Dedupe, "email:" + digest(contact["email"]))
+            ]
+            if not fresh_contacts:
+                # Another candidate can finalize after this one's validation stage.
+                # Recheck the hashes before spending local/remote classifier resources.
+                metric(db, candidate.source, "email_duplicates")
+                _reject(db, candidate)
+                count += 1
+                continue
+            candidate.contacts = fresh_contacts
             classification = db.scalar(
                 select(Classification).where(
                     Classification.candidate_id == candidate.id, Classification.provider == "rules"
                 )
             )
             if not classification:
-                candidate.status = "REVIEW"
+                _terminal(candidate, "REVIEW")
                 db.add(Failure(source=candidate.source, code="rules_result_missing"))
                 count += 1
                 continue
@@ -279,7 +300,7 @@ def classify_batch(limit):
                     candidate.attempts += 1
                     candidate.available_at = now() + timedelta(hours=min(24, 2**candidate.attempts))
                     if candidate.attempts >= settings().job_max_attempts:
-                        candidate.status = "REVIEW"
+                        _terminal(candidate, "REVIEW")
                     metric(db, candidate.source, semantic.provider() + "_deferred")
                     db.add(Failure(source=candidate.source, code=str(exc)))
                     count += 1
@@ -299,7 +320,7 @@ def classify_batch(limit):
             if qualified:
                 _finalize(db, candidate)
             elif route == "DEFERRED":
-                candidate.status = "DEFERRED"
+                _terminal(candidate, "DEFERRED")
                 metric(db, candidate.source, "rank_deferred")
             else:
                 _reject(db, candidate)
@@ -322,7 +343,7 @@ def validate_batch(limit):
             if not candidate:
                 break
             if not candidate.contacts:
-                candidate.status = "NO_CONTACT"
+                _terminal(candidate, "NO_CONTACT")
                 metric(db, candidate.source, "no_contact")
                 count += 1
                 continue
@@ -363,7 +384,7 @@ def validate_batch(limit):
                     candidate.attempts += 1
                     candidate.available_at = now() + timedelta(minutes=2**candidate.attempts)
                 else:
-                    candidate.status = "CONTACT_REVIEW"
+                    _terminal(candidate, "CONTACT_REVIEW")
                     metric(db, candidate.source, "contact_review")
             count += 1
     return {"validated_checked": count}
@@ -385,12 +406,24 @@ def cleanup(limit):
         )
         if ids:
             db.execute(delete(SourceRecord).where(SourceRecord.id.in_(ids)))
+        terminal = ["NO_CONTACT", "CONTACT_REVIEW", "DEFERRED", "REVIEW"]
+        pressure = backpressure.inspect(db)
+        pressure_cleanup = (
+            pressure["mode"] in {"drain", "storage_pressure"}
+            or pressure["total_work_rows"] >= cfg.queue_high_water
+        )
+        terminal_due = Candidate.available_at < now() - timedelta(hours=cfg.terminal_candidate_retention_hours)
         expired_candidates = db.scalars(
             select(Candidate)
             .where(
-                Candidate.created_at < now() - timedelta(days=cfg.candidate_retention_days),
+                or_(
+                    Candidate.status.in_(terminal) & or_(terminal_due, pressure_cleanup),
+                    Candidate.status.not_in(["VALIDATE", "CLASSIFY", *terminal])
+                    & (Candidate.created_at < now() - timedelta(days=cfg.candidate_retention_days)),
+                ),
                 ~select(Lead.id).where(Lead.identity_hash == Candidate.identity_hash).exists(),
             )
+            .order_by(Candidate.available_at, Candidate.created_at)
             .limit(limit)
         ).all()
         candidates = [c.id for c in expired_candidates]
@@ -415,4 +448,6 @@ def cleanup(limit):
             db.execute(delete(EmailValidation).where(EmailValidation.email_hash.in_(expired_emails)))
         metric(db, "all", "raw_cleaned", len(ids))
         metric(db, "all", "candidates_expired", len(candidates))
+        if pressure_cleanup:
+            metric(db, "all", "terminal_pressure_discarded", sum(c.status in terminal for c in expired_candidates))
     return {"raw_deleted": len(ids), "candidates_expired": len(candidates)}

@@ -105,16 +105,16 @@ function dailyBackup() {
       const prior = namedFile_(folder, 'backup-manifest-' + today + '.json');
       if (prior) {
         const old = JSON.parse(prior.getBlob().getDataAsString());
-        if (!old.complete || old.spreadsheet_id !== cfg.sheet) throw new Error('BACKUP_MANIFEST_MISMATCH');
+        if (!old.complete || old.spreadsheet_id !== cfg.sheet || old.drive_folder_id !== cfg.folder) throw new Error('BACKUP_MANIFEST_MISMATCH');
         completeBackup_(old, prior);
         return;
       }
       const shards = backupSnapshot_();
-      state = {date: today, spreadsheet_id: cfg.sheet, shards: shards, shard: 0, row: 2, part: 1,
+      state = {date: today, spreadsheet_id: cfg.sheet, drive_folder_id: cfg.folder, shards: shards, shard: 0, row: 2, part: 1,
         stage: shards.length ? 'leads' : 'stats', complete: false, started_at: new Date().toISOString()};
       saveState_(state);
     }
-    if (state.spreadsheet_id !== cfg.sheet) throw new Error('BACKUP_DESTINATION_MISMATCH');
+    if (state.spreadsheet_id !== cfg.sheet || state.drive_folder_id !== cfg.folder) throw new Error('BACKUP_DESTINATION_MISMATCH');
     while (state.stage === 'leads' && Date.now() - started < 180000) backupPart_(folder, state);
     if (state.stage === 'stats' && Date.now() - started < 180000) {
       const files = [snapshotApiFile_(folder, 'source-stats-' + state.date + '.csv', '/exports/source-stats', 'text/csv'),
@@ -127,7 +127,7 @@ function dailyBackup() {
       const manifestName = 'backup-manifest-' + state.date + '.json';
       const manifest = namedFile_(folder, manifestName) || checkedFileOnce_(folder, manifestName, JSON.stringify(state), 'application/json');
       const saved = JSON.parse(manifest.getBlob().getDataAsString());
-      if (!saved.complete || saved.spreadsheet_id !== cfg.sheet || saved.date !== state.date) throw new Error('BACKUP_MANIFEST_MISMATCH');
+      if (!saved.complete || saved.spreadsheet_id !== cfg.sheet || saved.drive_folder_id !== cfg.folder || saved.date !== state.date) throw new Error('BACKUP_MANIFEST_MISMATCH');
       completeBackup_(saved, manifest);
     } else {
       status_('BACKUP', 'IN_PROGRESS', state.date + '; next part=' + state.part);

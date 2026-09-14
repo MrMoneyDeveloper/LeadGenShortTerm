@@ -5,7 +5,19 @@ from sqlalchemy import func, select, text
 
 from app.config import settings
 from app.database import session
-from app.models import Candidate, ExportBatch, Failure, Job, Lead, Metric, PipelineState, SourceCursor, SourceRecord, Usage, now
+from app.models import (
+    Candidate,
+    ExportBatch,
+    Failure,
+    Job,
+    Lead,
+    Metric,
+    PipelineState,
+    SourceCursor,
+    SourceRecord,
+    Usage,
+    now,
+)
 
 LEAD_FIELDS = [
     "id",

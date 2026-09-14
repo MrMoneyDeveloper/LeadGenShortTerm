@@ -54,6 +54,7 @@ def receipt(batch):
 def test_claim_stable_after_restart_and_ack_drains_only_verified_batch(postgres, isolated_settings):
     setup(postgres, isolated_settings)
     first = delivery.claim()
+    assert first["shard_rows"] == 2
     assert first["items"][0]["row"] == 2
     assert first["items"][1]["row"] == 3
     assert first["checksum"] == delivery.checksum(first["items"])
@@ -78,10 +79,43 @@ def test_claim_stable_after_restart_and_ack_drains_only_verified_batch(postgres,
         assert db.get(Dedupe, "lead:" + "0" * 64)
         assert db.get(Dedupe, "candidate:" + "0" * 64) is None
     second = delivery.claim()
+    assert second["shard_rows"] == 2
     assert second["items"][0]["tab"] == "VALIDATED_002"
     assert second["items"][0]["row"] == 2
     delivery.acknowledge(receipt(second))
     assert delivery.claim() == {"status": "empty", "items": []}
+
+
+@pytest.mark.parametrize("profile,expected", [
+    ({"first_name": "Mohammed", "name_reliable": True, "name_source": "explicit_given_name"}, "Mohammed"),
+    ({"first_name": "Thandi", "name_reliable": True, "name_source": "operator_verified"}, "Thandi"),
+    ({"display_name": "Mohammed Smith"}, ""),
+    ({"first_name": "Mohammed", "name_reliable": False, "name_source": "explicit_given_name"}, ""),
+    ({"first_name": "Mohammed", "name_reliable": True, "name_source": "model_guess"}, ""),
+    ({"first_name": "=IMPORTXML(x)", "name_reliable": True, "name_source": "operator_verified"}, ""),
+    ({"first_name": "Mohammed", "name_reliable": True, "name_source": "operator_verified", "business_name": "Example"}, ""),
+])
+def test_final_payload_personalization_and_evidence(postgres, isolated_settings, profile, expected):
+    setup(postgres, isolated_settings, count=1)
+    with postgres() as db:
+        lead = db.scalar(select(Lead))
+        lead.profile = profile
+        lead.excerpt = "Public request for a motor insurance quote."
+    batch = delivery.claim()
+    row = dict(zip(batch["fields"], batch["items"][0]["values"], strict=True))
+    assert row["first_name"] == expected
+    assert row["salutation"] == (f"Good day {expected}," if expected else "Good day,")
+    assert row["source_evidence"] == "Public request for a motor insurance quote."
+    assert row["email_source_url"] == row["source_url"]
+    assert batch == delivery.claim()
+
+
+def test_shard_size_cannot_change_after_first_allocation(postgres, isolated_settings):
+    setup(postgres, isolated_settings)
+    delivery.claim()
+    isolated_settings.sheet_shard_rows = 3
+    with pytest.raises(delivery.DeliveryError, match="destination_changed"):
+        delivery.claim()
 
 
 @pytest.mark.parametrize("field,value", [

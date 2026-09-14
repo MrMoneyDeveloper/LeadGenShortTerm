@@ -94,6 +94,7 @@ def test_retention_preserves_pending_raw(postgres):
                 score=40,
                 status="NO_CONTACT",
                 created_at=now() - timedelta(days=40),
+                available_at=now() - timedelta(days=40),
             )
         )
     pipeline.cleanup(100)

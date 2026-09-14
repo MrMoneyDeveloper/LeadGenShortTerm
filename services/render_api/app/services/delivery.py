@@ -3,6 +3,7 @@
 import hashlib
 import json
 import secrets
+import unicodedata
 
 from sqlalchemy import delete, select
 
@@ -12,7 +13,8 @@ from app.models import Candidate, Dedupe, ExportBatch, Lead, PipelineState, Sour
 from app.repositories import metric
 
 FIELDS = [
-    "lead_id", "campaign_id", "display_name", "username", "business_name", "email", "source",
+    "lead_id", "campaign_id", "display_name", "first_name", "salutation", "username", "business_name", "email", "source",
+    "source_evidence",
     "source_url", "email_source_url", "product_type", "rank_score", "score", "validation_status", "created_at",
 ]
 
@@ -35,7 +37,17 @@ def envelope(batch):
         "batch_id": batch.id, "campaign_id": batch.campaign_id, "status": batch.status,
         "spreadsheet_id": batch.spreadsheet_id, "drive_folder_id": batch.drive_folder_id,
         "checksum": batch.checksum, "fields": batch.fields, "items": canonical_items(batch.items),
+        "shard_rows": batch.shard_rows,
     }
+
+
+def personalization(profile):
+    name = profile.get("first_name", "")
+    reliable = profile.get("name_reliable") is True and profile.get("name_source") in {"explicit_given_name", "operator_verified"}
+    valid = isinstance(name, str) and 1 < len(name) <= 60 and any(c.isalpha() for c in name)
+    valid = valid and all(c.isalpha() or unicodedata.category(c).startswith("M") or c in "-'’" for c in name)
+    name = name if reliable and valid and not profile.get("business_name") else ""
+    return {"first_name": name, "salutation": f"Good day {name}," if name else "Good day,"}
 
 
 def claim(limit=None):
@@ -71,6 +83,8 @@ def claim(limit=None):
             values = {
                 **{key: getattr(lead, key) for key in ("email", "source", "source_url", "email_source_url", "product_type", "score", "validation_status")},
                 **{key: profile.get(key, "") for key in ("display_name", "username", "business_name")},
+                **personalization(profile),
+                "source_evidence": lead.excerpt[:2000],
                 "lead_id": f"{cfg.campaign_id}:{lead.id}", "campaign_id": cfg.campaign_id,
                 "rank_score": format(lead.rank_score, ".2f"), "created_at": lead.created_at.isoformat(),
             }
@@ -83,6 +97,7 @@ def claim(limit=None):
             campaign_id=cfg.campaign_id, spreadsheet_id=cfg.google_spreadsheet_id,
             drive_folder_id=cfg.google_drive_backup_folder_id, checksum=checksum(items), fields=FIELDS,
             items=items, count=len(items), first_position=state.export_next_position,
+            shard_rows=cfg.sheet_shard_rows,
         )
         db.add(batch)
         state.export_next_position += len(items)

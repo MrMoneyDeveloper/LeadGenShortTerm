@@ -10,8 +10,7 @@ from app.config import rules, settings
 from app.database import advisory_lock, session
 from app.models import Candidate, Failure, Job, PipelineState, SourceCursor, SourceRecord, now
 from app.repositories import metric
-from app.services import pipeline
-from app.services import backpressure
+from app.services import backpressure, pipeline
 
 KINDS = ("collect", "normalize", "classify", "validate", "cleanup")
 logger = logging.getLogger("leadgen.jobs")

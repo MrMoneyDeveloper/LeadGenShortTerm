@@ -5,7 +5,9 @@ function validateDelivery_(batch) {
     throw new Error('DELIVERY_DESTINATION_MISMATCH');
   }
   if (!/^[a-f0-9]{64}$/.test(batch.checksum || '') || !batch.batch_id || !Array.isArray(batch.fields) ||
-      !batch.fields.length || batch.fields[0] !== 'lead_id' || !Array.isArray(batch.items) ||
+      !batch.fields.length || batch.fields.some(field => typeof field !== 'string') ||
+      batch.fields[0] !== 'lead_id' || !Array.isArray(batch.items) ||
+      !Number.isSafeInteger(batch.shard_rows) || batch.shard_rows < 1 ||
       batch.items.length < 1 || batch.items.length > 200 || sha256_(JSON.stringify(batch.items)) !== batch.checksum) {
     throw new Error('DELIVERY_BATCH_INVALID');
   }
@@ -13,7 +15,7 @@ function validateDelivery_(batch) {
   batch.items.forEach(item => {
     const place = item.tab + ':' + item.row;
     if (!Number.isSafeInteger(item.lead_id) || item.lead_id < 1 ||
-        !/^VALIDATED_\d{3,}$/.test(item.tab) || !Number.isInteger(item.row) || item.row < 2 || item.row > 5001 ||
+        !/^VALIDATED_\d{3,}$/.test(item.tab) || !Number.isInteger(item.row) || item.row < 2 || item.row > batch.shard_rows + 1 ||
         !Array.isArray(item.values) || item.values.length !== batch.fields.length ||
         item.values.some(v => typeof v !== 'string') ||
         item.values[0] !== String(batch.campaign_id) + ':' + item.lead_id || ids[item.lead_id] || places[place]) {
@@ -97,7 +99,7 @@ function readDeliveryFile_(file, expectedChecksum) {
 function deliveryEnvelope_(batch) {
   return {batch_id: batch.batch_id, checksum: batch.checksum, campaign_id: batch.campaign_id,
     spreadsheet_id: batch.spreadsheet_id, drive_folder_id: batch.drive_folder_id,
-    fields: batch.fields, items: batch.items};
+    shard_rows: batch.shard_rows, fields: batch.fields, items: batch.items};
 }
 
 function acknowledgeDelivery_(batch, file) {

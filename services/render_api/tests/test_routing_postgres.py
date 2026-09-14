@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.classifiers.grok import SemanticResult
-from app.models import Candidate, Classification, Lead, now
+from app.models import Candidate, Classification, Dedupe, Lead, PipelineState, now
 from app.qualification import digest
 from app.services import pipeline
 
@@ -86,3 +86,60 @@ def test_semantic_retry_budget_and_stale_contacts_cannot_bypass_validation(postg
     with postgres() as db:
         assert db.get(Candidate, row_id).status == "VALIDATE"
         assert db.scalar(select(func.count()).select_from(Lead)) == 0
+
+
+def test_pressure_cleanup_releases_terminal_backlog_but_preserves_active_and_unacknowledged(postgres, isolated_settings):
+    isolated_settings.queue_high_water, isolated_settings.queue_low_water = 5, 1
+    with postgres() as db:
+        db.add(PipelineState(id=1, paused=False))
+        ids = [candidate(db, name, 80) for name in ("no-contact", "review", "deferred", "active", "unacknowledged")]
+        for row_id, status in zip(ids, ["NO_CONTACT", "CONTACT_REVIEW", "DEFERRED", "CLASSIFY", "REVIEW"], strict=True):
+            row = db.get(Candidate, row_id)
+            row.status = status
+            row.created_at = now() - timedelta(days=40)
+            db.add(Dedupe(key="candidate:" + row.identity_hash))
+            db.add(Dedupe(key="record:" + digest(row_id)))
+        row = db.get(Candidate, ids[-1])
+        db.add(Lead(candidate_id=row.id, email="unack@example.org", email_hash=digest("unack@example.org"),
+                    identity_hash=row.identity_hash, source="fixture", source_url=row.source_url,
+                    email_source_url=row.source_url, excerpt="finished", product_type="MOTOR", score=95))
+    # One bounded chunk frees only terminal records. Old unfinished/awaiting-ACK data survives.
+    result = pipeline.cleanup(2)
+    assert result["candidates_expired"] == 2
+    with postgres() as db:
+        assert db.get(Candidate, ids[3]) is not None
+        assert db.get(Candidate, ids[4]) is not None
+        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("record:%"))) == 5
+    assert pipeline.cleanup(2)["candidates_expired"] == 1
+    with postgres() as db:
+        assert db.scalar(select(func.count()).select_from(Candidate)) == 2
+        assert db.scalar(select(func.count()).select_from(Lead)) == 1
+
+
+def test_terminal_age_cleanup_uses_review_window(postgres, isolated_settings):
+    isolated_settings.terminal_candidate_retention_hours = 24
+    with postgres() as db:
+        for name, hours in [("new-review", 1), ("old-review", 25)]:
+            row = db.get(Candidate, candidate(db, name, 80))
+            row.status = "REVIEW"
+            row.available_at = now() - timedelta(hours=hours)
+    assert pipeline.cleanup(5)["candidates_expired"] == 1
+    with postgres() as db:
+        assert db.scalar(select(Candidate.excerpt)) == "new-review"
+
+
+def test_duplicate_email_rechecked_after_validation_before_remote_call(postgres, monkeypatch):
+    with postgres() as db:
+        for name, score in [("first", 90), ("second", 80)]:
+            row = db.get(Candidate, candidate(db, name, score))
+            row.contacts = [{"email": "shared@example.org", "source_url": row.source_url}]
+    monkeypatch.setattr(pipeline.local, "classify", lambda _text: None)
+    monkeypatch.setattr(pipeline, "validate_contact", lambda _email: ("DELIVERABLE_DOMAIN", "fixture"))
+    calls = []
+    monkeypatch.setattr(pipeline.semantic, "classify", lambda _text, score: calls.append(score) or semantic_pass())
+    pipeline.validate_batch(5)
+    pipeline.classify_batch(5)
+    assert calls == [90]
+    with postgres() as db:
+        assert db.scalar(select(func.count()).select_from(Lead)) == 1
+        assert db.scalar(select(func.count()).select_from(Candidate)) == 1

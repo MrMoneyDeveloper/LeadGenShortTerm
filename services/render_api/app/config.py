@@ -1,6 +1,6 @@
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from datetime import datetime
 from typing import Literal
 
 import yaml
@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     semantic_timeout_seconds: int = Field(20, ge=5, le=60)
     raw_retention_days: int = Field(3, ge=1, le=30)
     candidate_retention_days: int = Field(30, ge=1)
+    terminal_candidate_retention_hours: int = Field(24, ge=0, le=168)
     operational_retention_days: int = Field(30, ge=1)
     delete_rejected_immediately: bool = Field(
         True, validation_alias=AliasChoices("DELETE_REJECTED_IMMEDIATELY", "DELETE_REJECTED_RAW")

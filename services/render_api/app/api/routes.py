@@ -8,8 +8,7 @@ from app import jobs
 from app.api.auth import dashboard, operator
 from app.database import session
 from app.models import Candidate, Job, PipelineState, SourceCursor, now
-from app.services import reporting
-from app.services import backpressure, delivery
+from app.services import backpressure, delivery, reporting
 
 router = APIRouter()
 
@@ -62,7 +61,7 @@ class Placement(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     lead_id: int = Field(ge=1, le=9_007_199_254_740_991)
     tab: str = Field(pattern=r"^VALIDATED_[0-9]{3,}$", max_length=40)
-    row: int = Field(ge=2, le=5001)
+    row: int = Field(ge=2)
 
 
 class AckRequest(BaseModel):

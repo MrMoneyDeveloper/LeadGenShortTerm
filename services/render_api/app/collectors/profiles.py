@@ -26,8 +26,19 @@ def public_url(value):
 
 def profile(record):
     """The only profile fields allowed into temporary storage and final exports."""
+    first_name = clean_label(record.first_name, 80)
+    # Display labels/handles/email local-parts cannot establish a given name.
+    # Only an adapter's explicit structured public field or operator verification may do so.
+    reliable = bool(
+        record.name_reliable is True and record.name_source in {"explicit_given_name", "operator_verified"}
+        and first_name and all(char.isalpha() or char in " -'’" for char in first_name)
+        and any(char.isalpha() for char in first_name)
+    )
     return {
         "display_name": clean_label(record.display_name),
+        "first_name": first_name if reliable else "",
+        "name_reliable": reliable,
+        "name_source": record.name_source if reliable else "",
         "username": clean_label(record.username),
         "business_name": clean_label(record.business_name),
         "urls": list(dict.fromkeys(url for item in record.urls[:10] if (url := public_url(item))))[:5],
