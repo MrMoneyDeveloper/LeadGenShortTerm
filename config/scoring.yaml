@@ -1,25 +1,28 @@
-version: rules-v1
+version: rules-v2
 weights:
   quote: 35
   recommendation: 30
   switch: 25
   premium: 20
   vehicle: 15
+  property: 15
   south_africa: 15
   insurer: 10
   broker: -60
   job: -50
   advertisement: -50
   news: -40
+  non_target: -70
 source_weights: {bluesky: 0, youtube: 0}
 discard_below: 25
 accept_without_llm_above: 85
 local_confidence: 0.85
 max_age_days: 30
-require_south_africa: true
-negative_signals: [broker, job, advertisement, news]
+# South African evidence boosts the score, but absence alone must not hard-reject otherwise strong intent.
+require_south_africa: false
+negative_signals: [broker, job, advertisement, news, non_target]
 ranking:
-  version: ordinal-rank-v1
+  version: ordinal-rank-v2
   # These are configurable operating thresholds, not measured probabilities.
   rules_weight: 0.7
   contact_points: 1.0
