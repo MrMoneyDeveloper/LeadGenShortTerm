@@ -74,6 +74,9 @@ def claim(limit=None):
         rows = db.scalars(select(Lead).order_by(Lead.id).limit(limit).with_for_update()).all()
         if not rows:
             return {"status": "empty", "items": []}
+
+        # The persisted campaign ID survives Render restarts and cannot drift if an env value changes mid-run.
+        campaign_id = state.campaign_id or cfg.campaign_id
         items = []
         for offset, lead in enumerate(rows):
             if lead.id > 9_007_199_254_740_991:
@@ -85,7 +88,7 @@ def claim(limit=None):
                 **{key: profile.get(key, "") for key in ("display_name", "username", "business_name")},
                 **personalization(profile),
                 "source_evidence": lead.excerpt[:2000],
-                "lead_id": f"{cfg.campaign_id}:{lead.id}", "campaign_id": cfg.campaign_id,
+                "lead_id": f"{campaign_id}:{lead.id}", "campaign_id": campaign_id,
                 "rank_score": format(lead.rank_score, ".2f"), "created_at": lead.created_at.isoformat(),
             }
             items.append({
@@ -94,7 +97,7 @@ def claim(limit=None):
                 "values": [str(values[field] or "") for field in FIELDS],
             })
         batch = ExportBatch(
-            campaign_id=cfg.campaign_id, spreadsheet_id=cfg.google_spreadsheet_id,
+            campaign_id=campaign_id, spreadsheet_id=cfg.google_spreadsheet_id,
             drive_folder_id=cfg.google_drive_backup_folder_id, checksum=checksum(items), fields=FIELDS,
             items=items, count=len(items), first_position=state.export_next_position,
             shard_rows=cfg.sheet_shard_rows,
@@ -112,7 +115,7 @@ def acknowledge(body):
     # ACK remains available when delivery is disabled, allowing an in-flight verified batch to finish.
     ack_hash = checksum(body)
     with session() as db:
-        db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
+        state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
         batch = db.get(ExportBatch, body["batch_id"])
         if not batch:
             raise DeliveryError("export_batch_not_found")
@@ -149,6 +152,8 @@ def acknowledge(body):
         batch.status, batch.ack_digest = "ACKNOWLEDGED", ack_hash
         batch.drive_file_id, batch.acknowledged_at = body["drive_file_id"], now()
         batch.items, batch.fields = [], []
+        if state is not None and state.campaign_status in {"RUNNING", "DRAINING", "FINALIZING"}:
+            state.campaign_last_progress_at = now()
         metric(db, "all", "delivery_acknowledged", batch.count)
         return {"status": "ACKNOWLEDGED", "deleted_leads": batch.count, "replayed": False}
 
