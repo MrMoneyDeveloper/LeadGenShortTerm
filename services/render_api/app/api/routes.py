@@ -8,7 +8,7 @@ from app import jobs
 from app.api.auth import dashboard, operator
 from app.database import session
 from app.models import Candidate, Job, PipelineState, SourceCursor, now
-from app.services import backpressure, delivery, reporting
+from app.services import backpressure, campaign, delivery, reporting
 
 router = APIRouter()
 
@@ -18,6 +18,12 @@ class JobRequest(BaseModel):
     source: Literal["bluesky", "youtube"] | None = None
     stage: Literal["normalize", "classify", "validate"] = "normalize"
     batch_size: int | None = Field(None, ge=1, le=2000)
+
+
+class CampaignStartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    raw_target: int | None = Field(None, ge=1, le=10_000_000)
+    duration_days: int | None = Field(None, ge=1, le=30)
 
 
 @router.get("/health")
@@ -50,6 +56,22 @@ def queue():
 @router.get("/dashboard/backpressure", dependencies=[Depends(dashboard)])
 def pressure():
     return backpressure.status()
+
+
+@router.get("/dashboard/campaign", dependencies=[Depends(dashboard)])
+def campaign_status():
+    try:
+        return campaign.status()
+    except campaign.CampaignError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@router.post("/admin/campaign/start", dependencies=[Depends(operator)])
+def start_campaign(body: CampaignStartRequest):
+    try:
+        return campaign.start(body.raw_target, body.duration_days)
+    except campaign.CampaignError as exc:
+        raise HTTPException(409, str(exc)) from None
 
 
 class ClaimRequest(BaseModel):
