@@ -10,7 +10,7 @@ from app.config import rules, settings
 from app.database import advisory_lock, session
 from app.models import Candidate, Failure, Job, PipelineState, SourceCursor, SourceRecord, now
 from app.repositories import metric
-from app.services import backpressure, pipeline
+from app.services import backpressure, campaign, pipeline
 
 KINDS = ("collect", "normalize", "classify", "validate", "cleanup")
 logger = logging.getLogger("leadgen.jobs")
@@ -34,6 +34,9 @@ def permitted(db, kind, source=None):
     if pressure["mode"] == "storage_pressure":
         return False
     if kind == "collect":
+        # Production acquisition requires the explicit persisted campaign start operation.
+        if cfg.environment == "production" and state.campaign_status != "RUNNING":
+            return False
         row = db.get(SourceCursor, source)
         return bool(
             pressure["mode"] == "collect"
@@ -109,6 +112,7 @@ def run_next():
             with session() as db:
                 stored = db.get(Job, job_id)
                 stored.status, stored.completed_at, stored.result = "COMPLETE", now(), result
+                campaign.record_progress(db)
             logger.info("job_complete kind=%s job_id=%s", job.kind, job_id)
             return {"status": "complete", "job_id": job_id, "result": result}
         except Exception as exc:
@@ -135,6 +139,9 @@ def run_next():
 
 def schedule_tick():
     cfg = settings()
+    # Every external/internal tick advances deadline/drain/finalization state even when no work is queued.
+    with session() as db:
+        backpressure.inspect(db)
     bucket = int(now().timestamp()) // cfg.scheduler_interval_seconds
     for kind, source in [
         ("cleanup", None),
