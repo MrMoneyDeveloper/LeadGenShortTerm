@@ -5,14 +5,24 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import session
-from app.models import Dedupe, Metric, Usage, now
+from app.models import Dedupe, Metric, PipelineState, Usage, now
 
 
 def metric(db, source, name, amount=1):
-    stmt = insert(Metric).values(day=now().date(), source=source, name=name, value=amount)
+    current = now()
+    stmt = insert(Metric).values(day=current.date(), source=source, name=name, value=amount)
     db.execute(
         stmt.on_conflict_do_update(index_elements=["day", "source", "name"], set_={"value": Metric.value + amount})
     )
+    # The aggregate raw counter commits in the same transaction as accepted source data and cursor state.
+    if source == "all" and name == "raw_scanned" and amount > 0:
+        state = db.get(PipelineState, 1)
+        if state is not None and state.campaign_status == "RUNNING":
+            state.campaign_raw_scanned += int(amount)
+            state.campaign_last_progress_at = current
+            if state.campaign_raw_target and state.campaign_raw_scanned >= state.campaign_raw_target:
+                state.campaign_status = "DRAINING"
+                state.draining = True
 
 
 def claim_hashes(db, keys):
