@@ -1,4 +1,5 @@
 # Existing PostgreSQL is configured via DATABASE_URL; no new database is provisioned.
+# This Blueprint is deliberately inert until environment/source/campaign gates are explicitly enabled.
 services:
   - type: web
     name: leadgen-shortterm-api
@@ -11,6 +12,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
+      - key: ENVIRONMENT
+        value: development
       - key: DATABASE_URL
         sync: false
       - key: PROCESSOR_TRIGGER_TOKEN
@@ -25,9 +28,17 @@ services:
         value: 'false'
       - key: YOUTUBE_ENABLED
         value: 'false'
+      - key: GROQ_ENABLED
+        value: 'false'
       - key: GROK_ENABLED
+        value: 'false'
+      - key: FINAL_DELIVERY_ENABLED
         value: 'false'
       - key: SCHEDULER_ENABLED
         value: 'false'
       - key: PROCESSING_BATCH_SIZE
         value: '600'
+      - key: CAMPAIGN_DURATION_DAYS
+        value: '7'
+      - key: CAMPAIGN_RAW_TARGET
+        value: '200000'
