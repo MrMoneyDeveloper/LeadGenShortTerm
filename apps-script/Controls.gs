@@ -19,6 +19,16 @@ function processorTick() {
   }
 }
 
+function deliveryTick() {
+  if (config_().props.getProperty('DELIVERY_ENABLED') !== 'true') return;
+  try {
+    deliverFinalLeads();
+  } catch (e) {
+    status_('DELIVERY', 'FAILED', errorCode_(e));
+    throw new Error(errorCode_(e));
+  }
+}
+
 function backupTick() {
   if (config_().props.getProperty('BACKUPS_ENABLED') !== 'true') return;
   dailyBackup();
@@ -29,13 +39,21 @@ function dashboardTick() {
   refreshDashboard();
 }
 
-/** Explicit Phase-2-or-later setup only. No triggers are installed automatically. */
+/** Explicit setup only. No triggers are installed automatically. */
 function installReportingTriggers() {
   const names = ['dashboardTick', 'backupTick'];
   ScriptApp.getProjectTriggers().filter(t => names.indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('dashboardTick').timeBased().everyMinutes(15).create();
   ScriptApp.newTrigger('backupTick').timeBased().everyHours(1).create();
+}
+
+/** Final-lead delivery is independent of acquisition scheduling. */
+function installDeliveryTrigger() {
+  if (config_().props.getProperty('DELIVERY_ENABLED') !== 'true') throw new Error('CONFIG_DELIVERY_DISABLED');
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'deliveryTick')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('deliveryTick').timeBased().everyMinutes(5).create();
 }
 
 function installProcessorTrigger() {
@@ -46,7 +64,7 @@ function installProcessorTrigger() {
 }
 
 function removeLeadgenTriggers() {
-  const names = ['processorTick', 'dashboardTick', 'backupTick'];
+  const names = ['processorTick', 'deliveryTick', 'dashboardTick', 'backupTick'];
   ScriptApp.getProjectTriggers().filter(t => names.indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
 }
