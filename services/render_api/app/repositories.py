@@ -31,8 +31,8 @@ def usage_day(provider):
     return datetime.now(zone).date()
 
 
-def reserve(provider, units, cap):
-    # Committed before the HTTP call, including failed calls. Crashes cannot reset caps.
+def reserve_budget(provider, units, unit_cap, token_cap=None):
+    """Atomically reserve attempts and optionally stop once already-accounted tokens reach a soft cap."""
     day = usage_day(provider)
     with session() as db:
         db.execute(
@@ -41,10 +41,17 @@ def reserve(provider, units, cap):
             .on_conflict_do_nothing()
         )
         row = db.scalar(select(Usage).where(Usage.day == day, Usage.provider == provider).with_for_update())
-        if row.units + units > cap:
-            return False
+        if token_cap is not None and row.input_tokens + row.output_tokens >= token_cap:
+            return "token_cap"
+        if row.units + units > unit_cap:
+            return "unit_cap"
+        # Committed before the HTTP call, including failed calls. Crashes cannot reset caps.
         row.units += units
-    return True
+    return "ok"
+
+
+def reserve(provider, units, cap):
+    return reserve_budget(provider, units, cap) == "ok"
 
 
 def account_tokens(provider, incoming, outgoing, cost):
