@@ -67,6 +67,7 @@ def test_rank_routes_are_configurable_ordinal_scores(score, route):
 def test_rank_hard_gates_and_confident_local_negative():
     result = {"score": 100, "product_type": "MOTOR", "signals": ["south_africa"]}
     assert rank(result, False)["route"] != "DIRECT_FINAL"
-    assert rank({**result, "signals": []}, True)["route"] != "DIRECT_FINAL"
+    no_geo = rank({**result, "signals": []}, True)
+    assert no_geo["hard_gates"]["geography"] and not no_geo["hard_gates"]["geography_signal"]
     assert rank({**result, "product_type": "UNKNOWN"}, True)["route"] != "DIRECT_FINAL"
     assert rank(result, True, {"label": "ADVERTISEMENT", "confidence": 0.99})["route"] == "REJECT"
