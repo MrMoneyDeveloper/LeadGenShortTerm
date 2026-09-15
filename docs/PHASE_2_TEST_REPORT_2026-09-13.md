@@ -29,8 +29,8 @@ credentialed runtime checks remain outstanding. Phase 3 must not begin yet.
 - PostgreSQL 17.11 ran on loopback port 55433 with separate `leadgen_phase2`, `leadgen_fixture` and
   performance databases. No Render database was mutated.
 - Google artifacts were created in the private
-  [Phase-2 test folder](https://drive.google.com/drive/folders/1U3xU5mwdUzgWPeE1o6Fwkij1d0-G7kcG).
-  The native [test dashboard](https://docs.google.com/spreadsheets/d/1SqwVcIJIjOCVKNCaa3oAMzGs8u-A6niGl60xr6R_rmw/edit)
+  Phase-2 test folder (private resource ID omitted).
+  The native test dashboard (private resource ID omitted)
   is separate from configured operational destinations.
 
 ## Automated tests

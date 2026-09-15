@@ -16,7 +16,7 @@ credential that will perform it. Stop that integration on a mismatch or missing 
 
 ## Render and PostgreSQL
 
-Use the isolated LeadGenShortTerm test service in the configured Trident Wealth
+Use the isolated LeadGenShortTerm test service in the configured configured test
 workspace. The read-only services/render_api/scripts/phase2_render_preflight.py
 checks the configured workspace and matches the configured runtime origin to a
 service before checking health and a sanitized summary. It never deploys or migrates.

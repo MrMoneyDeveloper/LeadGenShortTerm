@@ -48,7 +48,7 @@ Use direct Render API/CLI calls authenticated only with:
 - `RENDER_WORKSPACE_ID`
 - the exact service/database identifiers from the project configuration/runtime test plan
 
-The Phase-2 target is the isolated LeadGenShortTerm test resource in the **Trident Wealth** workspace. Never touch unrelated Render resources or the unrelated Royal Tires database/account.
+The Phase-2 target is the isolated LeadGenShortTerm test resource in the privately configured workspace. Never touch unrelated Render resources or unrelated databases/accounts.
 
 Before every mutation, verify the authenticated workspace and target service/database with the same `RENDER_API_KEY` that will perform the mutation.
 

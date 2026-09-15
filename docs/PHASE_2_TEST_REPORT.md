@@ -75,7 +75,7 @@ Two existing dependency deprecation warnings concern Starlette/httpx and AnyIO.
 ## Live Render verification
 
 Using only the configured .env credentials, the read-only preflight verified the
-Trident Wealth workspace and uniquely matched the configured runtime origin to the
+configured test workspace and uniquely matched the configured runtime origin to the
 isolated test service. /health and authenticated /dashboard/summary returned HTTP 200.
 The runtime reports environment=test, paused=true, every execution flag=false,
 raw_pending=0, candidates=0, validated=2, delivered=0. Those two existing final rows
@@ -96,10 +96,10 @@ allowlist; private configuration, credentials and local tooling were excluded.
 1. Cloudflare API token is empty in the private configuration. Supply it privately
    in .env, then verify account/resource identity before deployment.
 2. clasp 3.4.1 is installed locally and its target is pinned from .env. The upload
-   list contains exactly the six expected Apps Script files. Interactive Google
-   authorization was started but is not yet confirmed. Authenticate the intended account,
-   verify the configured Apps Script project, Sheet and Drive folder, then push code
-   and set private Script Properties. Do not choose accounts through connectors.
+   list contains exactly the six expected Apps Script files. Google authorization completed as the intended Google account. Identity and
+   the configured Apps Script project returned HTTP 200. The configured Sheet and
+   Drive folder both returned HTTP 404 under that account. Restore access or correct
+   the private destination IDs before upload or delivery. No Google mutation occurred.
 3. Apply migrations through 0005 explicitly to the verified isolated Render target
    before deploying this client. No remote deployment or migration was performed.
 4. Prove real Sheet write/readback, Drive copy verification, ACK and PostgreSQL cleanup.

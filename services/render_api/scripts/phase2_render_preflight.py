@@ -29,9 +29,9 @@ def main():
             return
         data = response.json()
         data = data.get('owner', data)
-        if data.get('id') != owner or data.get('name') != 'Trident Wealth':
+        if data.get('id') != owner or data.get('name') != cfg.get('RENDER_WORKSPACE_NAME'):
             raise ValueError('workspace_identity_mismatch')
-        print('workspace_identity: verified Trident Wealth')
+        print('workspace_identity: verified configured test workspace')
         matches = []
         cursor = None
         for _ in range(10):
