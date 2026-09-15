@@ -48,7 +48,9 @@ class PipelineState(Base):
 
     # Persist the campaign clock/state so the seven-day run survives Render sleep/restarts.
     campaign_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
-    campaign_status: Mapped[str] = mapped_column(String(24), default="READY", server_default="READY")
+    campaign_status: Mapped[str] = mapped_column(
+        String(24), default="READY", server_default="READY", index=True
+    )
     campaign_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     campaign_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     campaign_raw_target: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")

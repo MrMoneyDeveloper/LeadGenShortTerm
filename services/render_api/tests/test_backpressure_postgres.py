@@ -31,7 +31,14 @@ def test_queue_hysteresis_and_database_pressure(postgres, isolated_settings):
     with postgres() as db:
         assert backpressure.inspect(db, database_bytes=650_000_000)["mode"] == "storage_pressure"
         assert backpressure.inspect(db, database_bytes=500_000_000)["mode"] == "collect"
-    isolated_settings.campaign_deadline = now() - timedelta(seconds=1)
+    with postgres() as db:
+        state = db.get(PipelineState, 1)
+        state.campaign_status = "RUNNING"
+        state.campaign_deadline = now() - timedelta(seconds=1)
+        assert backpressure.inspect(db, database_bytes=100)["mode"] == "drain"
+        db.execute(delete(Candidate))
+    with postgres() as db:
+        assert backpressure.inspect(db, database_bytes=100)["campaign"]["status"] == "FINALIZING"
     with postgres() as db:
         assert backpressure.inspect(db, database_bytes=100)["mode"] == "campaign_complete"
 

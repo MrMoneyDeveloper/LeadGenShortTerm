@@ -106,7 +106,8 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
         assert "ambiguous@example.org" not in emails  # Low evidence stays local-only under the new rank policy.
         assert emails.count("shared@example.org") == 1
         assert db.scalar(select(func.count()).select_from(Lead)) == 3
-        assert db.scalar(select(func.count()).select_from(Candidate)) == 5
+        # Three accepted leads plus no-contact, malformed-contact and no-MX review rows remain.
+        assert db.scalar(select(func.count()).select_from(Candidate)) == 6
         states = dict(db.execute(select(Candidate.identity_hash, Candidate.status)).all())
         assert "CONTACT_REVIEW" in states.values()
         assert db.scalar(select(func.count()).select_from(SourceRecord)) == 0

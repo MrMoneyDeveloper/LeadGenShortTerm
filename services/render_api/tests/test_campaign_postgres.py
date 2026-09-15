@@ -1,3 +1,5 @@
+import pytest
+
 from app import jobs
 from app.models import PipelineState
 from app.services import campaign
@@ -34,8 +36,5 @@ def test_active_campaign_cannot_be_started_twice(postgres, isolated_settings):
     isolated_settings.campaign_id = "phase2-campaign-test"
     jobs.initialize()
     campaign.start(raw_target=10, duration_days=7)
-    try:
+    with pytest.raises(campaign.CampaignError, match="campaign_already_active"):
         campaign.start(raw_target=10, duration_days=7)
-        assert False, "second active campaign start should fail"
-    except campaign.CampaignError as exc:
-        assert str(exc) == "campaign_already_active"

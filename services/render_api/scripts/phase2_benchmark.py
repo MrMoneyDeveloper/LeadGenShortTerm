@@ -16,9 +16,11 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from app import jobs
+from app.classifiers.grok import SemanticResult
 from app.config import settings
 from app.models import Candidate, ExportBatch, Lead, SourceRecord
-from app.qualification import digest
+from app.qualification import digest, score
+from app.ranking import rank
 from app.services import delivery, pipeline
 
 
@@ -48,8 +50,8 @@ def main():
         raise SystemExit("Refusing benchmark against a non-loopback database")
     if not parsed.path.lstrip("/").startswith("leadgen_phase2_perf"):
         raise SystemExit("Refusing benchmark outside a leadgen_phase2_perf database")
-    if not 100 <= count <= 600:
-        raise SystemExit("PHASE2_BENCHMARK_RECORDS must be between 100 and 600")
+    if not 100 <= count <= 2000:
+        raise SystemExit("PHASE2_BENCHMARK_RECORDS must be between 100 and 2000")
     if any((cfg.acquisition_enabled, cfg.processing_enabled, cfg.scheduler_enabled,
             cfg.groq_enabled, cfg.grok_enabled, cfg.local_model_path)):
         raise SystemExit("Disable acquisition, processing, schedulers and all model providers first")
@@ -66,11 +68,16 @@ def main():
     inserted_at = datetime.now(UTC)
     started = time.perf_counter()
     with Session(engine) as db, db.begin():
+        bodies = (
+            "Need a quote for car insurance in Johannesburg; premium increased and I am changing insurer.",
+            "Can anyone recommend insurance instead of Santam in Durban? My car insurance premium increased.",
+            "Bought a new car in Gauteng and insurance is too expensive.",
+            "Insurance broker advertisement in Cape Town. Contact us for a quote today.",
+        )
         for i in range(count):
-            body = (
-                "Need a quote for car insurance in Johannesburg; premium increased and I am changing insurer. "
-                f"phase2-{i}@example.org"
-            )
+            bucket = i % 20
+            template = bodies[0] if bucket < 10 else bodies[1] if bucket < 14 else bodies[2] if bucket < 17 else bodies[3]
+            body = f"{template} phase2-{i}@example.org"
             db.add(
                 SourceRecord(
                     source="synthetic_benchmark",
@@ -89,9 +96,11 @@ def main():
     original_validator = pipeline.validate_contact
     original_semantic = pipeline.semantic.classify
     pipeline.validate_contact = lambda email: ("DELIVERABLE_DOMAIN", "controlled_fixture")
-    def deny_semantic(*args):
-        raise RuntimeError("Benchmark must never call an external model")
-    pipeline.semantic.classify = deny_semantic
+    pipeline.semantic.classify = lambda *_args: SemanticResult(
+        is_short_term_insurance_relevant=True, intent_level="HIGH", product_type="MOTOR",
+        is_consumer=True, is_advertisement=False, is_broker_or_agent=False,
+        south_africa_signal=True, score=90, reason="controlled benchmark semantic fixture",
+    )
     stages = {}
     try:
         processing_started = time.perf_counter()
@@ -103,6 +112,8 @@ def main():
                 break
             remaining -= result["normalized"]
         stages["normalize"] = time.perf_counter() - stage_started
+        with Session(engine) as db:
+            candidate_bytes = relation_bytes(db)
         stage_started = time.perf_counter()
         while True:
             result = pipeline.validate_batch(cfg.processing_batch_size)
@@ -125,6 +136,11 @@ def main():
         leads = db.scalar(select(func.count()).select_from(Lead))
         candidates = db.scalar(select(func.count()).select_from(Candidate))
         raw_remaining = db.scalar(select(func.count()).select_from(SourceRecord))
+    routes = {name: 0 for name in ("DIRECT_FINAL", "SEMANTIC", "DEFERRED", "REJECT")}
+    for body_index in range(count):
+        bucket = body_index % 20
+        template = bodies[0] if bucket < 10 else bodies[1] if bucket < 14 else bodies[2] if bucket < 17 else bodies[3]
+        routes[rank(score(template, "synthetic_benchmark", inserted_at), True)["route"]] += 1
     cfg.final_delivery_enabled = True
     cfg.google_spreadsheet_id, cfg.google_drive_backup_folder_id = "benchmark_sheet", "benchmark_folder"
     delivery_started = time.perf_counter()
@@ -161,13 +177,16 @@ def main():
         "rss_delta_bytes": rss_after - rss_before,
         "relation_baseline_bytes": baseline,
         "relation_after_raw_bytes": raw_bytes,
+        "relation_after_candidate_bytes": candidate_bytes,
         "relation_after_pipeline_bytes": final_bytes,
         "raw_growth_bytes_per_record": round((raw_bytes - baseline) / count, 2),
+        "candidate_stage_growth_bytes_per_record": round((candidate_bytes - baseline) / count, 2),
         "retained_growth_bytes_per_lead": round((final_bytes - baseline) / max(leads, 1), 2),
         "leads": leads,
         "candidates": candidates,
         "raw_remaining": raw_remaining,
         "grok_calls": 0,
+        "route_percentages": {key: round(value / count * 100, 2) for key, value in routes.items()},
         "source_to_candidate_conversion": round(candidates / count, 4),
         "candidate_to_valid_contact_conversion": round(leads / max(candidates, 1), 4),
     }

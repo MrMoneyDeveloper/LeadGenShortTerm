@@ -11,6 +11,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
+from sklearn.multiclass import OneVsRestClassifier
 from sklearn.pipeline import Pipeline
 
 LABELS = {
@@ -49,7 +50,11 @@ def main():
     pipeline = Pipeline(
         [
             ("tfidf", TfidfVectorizer(ngram_range=(1, 2), max_features=30000, sublinear_tf=True)),
-            ("classifier", LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)),
+            # liblinear is deterministic and avoids platform-specific stalls seen with the
+            # default multinomial solver on this small sparse Phase-2 training corpus.
+            ("classifier", OneVsRestClassifier(LogisticRegression(
+                max_iter=1000, class_weight="balanced", random_state=42, solver="liblinear"
+            ))),
         ]
     )
     pipeline.fit(train_x, train_y)

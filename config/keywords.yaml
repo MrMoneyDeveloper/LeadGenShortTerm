@@ -1,5 +1,6 @@
 relevance_terms:
   - insurance
+  - insurence
   - short term insurance
   - short-term insurance
   - insure
@@ -9,7 +10,9 @@ relevance_terms:
 products:
   MOTOR:
     - motor insurance
+    - motor insurence
     - car insurance
+    - car insurence
     - vehicle insurance
     - auto insurance
     - car cover
@@ -38,6 +41,10 @@ products:
     - household contents
     - home contents
     - contents cover
+    - electronics insurance
+    - electronics cover
+    - cover my belongings
+    - insure my electronics
     - household insurance
     - belongings insurance
     - insure my belongings
@@ -64,11 +71,16 @@ signals:
     - quote for vehicle insurance
     - quote for home insurance
     - need a quote
+    - need quote
+    - quote please
+    - quote pls
     - want a quote
   recommendation:
     - recommend insurance
     - recommend an insurer
     - recommend insurer
+    - recommendations
+    - recommendation
     - insurance recommendations
     - can anyone recommend insurance
     - can anyone recommend an insurer
@@ -83,6 +95,8 @@ signals:
     - switch insurer
     - switching insurance
     - switching insurer
+    - switch to another insurer
+    - who should i switch to
     - changing insurance
     - changing insurer
     - move insurance
@@ -101,15 +115,20 @@ signals:
     - cheaper insurer
     - renewal increased
     - renewal went up
+    - renewal is up
+    - renewal up
     - renewal too expensive
+    - too pricey
     - renewal premium
     - price increase
   vehicle:
     - new car
     - bought a car
+    - baught a car
     - buying a car
     - getting a car
     - first car
+    - 1st car
     - financed car
     - finance car
     - vehicle finance

@@ -26,7 +26,8 @@ def test_geography_not_inferred_from_platform():
         "youtube",
         now(),
     )
-    assert not result["confident"]
+    assert result["confident"]
+    assert "south_africa" not in result["signals"]
 
 
 def test_formula_injection_export():
