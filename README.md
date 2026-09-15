@@ -34,6 +34,11 @@ primary finished dataset.
 
 ## Autonomous campaign lifecycle
 
+Current migration head is `0005_semantic_drain_deadline`. Groq quota windows and
+cooldowns persist through restarts. Once a campaign drains, semantic work has a
+configurable grace period (24 hours by default); expired ambiguous work can be
+cleaned up while final leads remain protected until verified Google delivery ACK.
+
 The backend now persists campaign state instead of relying on a manually calculated deadline:
 
 ```text

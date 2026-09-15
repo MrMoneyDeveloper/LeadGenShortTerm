@@ -19,6 +19,7 @@ from app.models import (
     Job,
     Lead,
     Metric,
+    PipelineState,
     SourceCursor,
     SourceRecord,
     now,
@@ -26,7 +27,7 @@ from app.models import (
 from app.qualification import digest, normalize, score
 from app.ranking import rank, semantic_qualified
 from app.repositories import claim_hashes, metric
-from app.services import backpressure
+from app.services import backpressure, campaign
 from app.validators import contacts, validate_contact
 
 
@@ -294,9 +295,19 @@ def classify_batch(limit):
             route = ranked["route"]
             qualified = route == "DIRECT_FINAL"
             if route == "SEMANTIC":
+                if campaign.semantic_expired(db.get(PipelineState, 1), now()):
+                    _terminal(candidate, "REVIEW")
+                    metric(db, candidate.source, "semantic_finalization_expired")
+                    count += 1
+                    continue
                 try:
                     semantic_result = semantic.classify(candidate.excerpt, candidate.score)
                 except semantic.SemanticUnavailable as exc:
+                    if exc.retry_at is not None:
+                        candidate.available_at = exc.retry_at
+                        metric(db, candidate.source, semantic.provider() + "_deferred")
+                        count += 1
+                        continue
                     candidate.attempts += 1
                     candidate.available_at = now() + timedelta(hours=min(24, 2**candidate.attempts))
                     if candidate.attempts >= settings().job_max_attempts:
@@ -408,6 +419,18 @@ def cleanup(limit):
             db.execute(delete(SourceRecord).where(SourceRecord.id.in_(ids)))
         terminal = ["NO_CONTACT", "CONTACT_REVIEW", "DEFERRED", "REVIEW"]
         pressure = backpressure.inspect(db)
+        state = db.get(PipelineState, 1)
+        semantic_due = campaign.semantic_expired(state, now())
+        # Only already-ranked semantic work can expire without another classification.
+        # Raw, contact-validation work and any final awaiting ACK remain protected.
+        semantic_pending = (
+            (Candidate.status == "CLASSIFY")
+            & select(Classification.id).where(
+                Classification.candidate_id == Candidate.id,
+                Classification.provider == "ranking",
+                Classification.result["route"].astext == "SEMANTIC",
+            ).exists()
+        )
         pressure_cleanup = (
             pressure["mode"] in {"drain", "storage_pressure"}
             or pressure["total_work_rows"] >= cfg.queue_high_water
@@ -417,6 +440,7 @@ def cleanup(limit):
             select(Candidate)
             .where(
                 or_(
+                    semantic_pending & semantic_due,
                     Candidate.status.in_(terminal) & or_(terminal_due, pressure_cleanup),
                     Candidate.status.not_in(["VALIDATE", "CLASSIFY", *terminal])
                     & (Candidate.created_at < now() - timedelta(days=cfg.candidate_retention_days)),
@@ -428,6 +452,8 @@ def cleanup(limit):
         ).all()
         candidates = [c.id for c in expired_candidates]
         if candidates:
+            metric(db, "all", "semantic_finalization_expired",
+                   sum(c.status == "CLASSIFY" for c in expired_candidates))
             # Release temporary identity admission, while permanent record/content/email hashes remain.
             db.execute(
                 delete(Dedupe).where(Dedupe.key.in_(["candidate:" + c.identity_hash for c in expired_candidates]))

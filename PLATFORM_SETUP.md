@@ -1,60 +1,84 @@
-# Phase-1 platform setup
+# Phase 2 platform setup
 
-The code is built; platform setup and execution are separate. Keep schedules and acquisition disabled through the initial Phase-2 checks. Do not configure MWEB or Cloudflare.
+The runtime contract and docs/CONFIGURATION.md are authoritative. Use only isolated
+Phase-2 resources selected by the private repository-root .env. Never select a
+platform account through an unrelated connector session. Do not send outbound email
+or start the seven-day campaign.
 
-## Private environment
+## Private configuration
 
-Existing legacy example values were preserved in ignored `.env`, with DATABASE_URL mapped from the supplied external PostgreSQL URL for local use. Both example files now have empty placeholders. Never commit `.env`, credentials JSON, `.clasprc.json`, or `.clasp.json`.
+The application reads .env, not env. Both are ignored, but keep .env authoritative
+when updating values. Never paste credentials into reports or terminal output.
+Required IDs and credentials are described in RUNTIME_AGENT_CONTRACT.md.
 
-The old tracked example contained API/database credentials. Sanitizing the file does not erase Git history: rotate the exposed credentials before live use. History cleanup, if needed, must be coordinated separately and has not been done during this build.
+Before each external mutation, verify the identity and resource with the same
+credential that will perform it. Stop that integration on a mismatch or missing key.
 
-## PostgreSQL
+## Render and PostgreSQL
 
-Use the existing Render PostgreSQL database; the Blueprint does not create a duplicate. Set DATABASE_URL to the internal connection URL in Render. Use an external URL with required TLS/network permissions for local access to a disposable test database.
+Use the isolated LeadGenShortTerm test service in the configured Trident Wealth
+workspace. The read-only services/render_api/scripts/phase2_render_preflight.py
+checks the configured workspace and matches the configured runtime origin to a
+service before checking health and a sanitized summary. It never deploys or migrates.
+Run it with the local virtual-environment Python from the repository root.
 
-Run migrations first in Phase 2, against the disposable database:
+Migrations must be applied explicitly before deploying the updated client. Current
+head is 0005_semantic_drain_deadline. Test rollback only on a disposable local DB.
+The Render build installs dependencies; startup must not auto-apply migrations.
 
-```powershell
-.\.venv\Scripts\python -m alembic -c services/render_api/alembic.ini upgrade head
-```
-
-Migrations are absent from startup. A newly created service returns 503 until the explicit migration is applied. Run migrations from an authorized local environment if the service tier lacks a pre-deploy command/shell. Later, a reviewed pre-deploy command can run the same migration on a supported tier.
-
-## Render service
-
-Use root `render.yaml` and repository root as the build directory so shared `config/` is available. Build and start commands are in the Blueprint. Automatic deployment is off. Build commands install dependencies only. Select the region matching the existing database.
-
-Set DATABASE_URL and the two independent API tokens. The Blueprint can generate fresh tokens; copy their values privately into Apps Script. Existing local tokens are independent until you explicitly make corresponding values match. Add XAI_API_KEY/XAI_MODEL and YOUTUBE_API_KEY when those components are ready for testing. Runtime does not need Render management credentials.
-
-Record the deployed HTTPS RENDER_BASE_URL in private metadata and Script Properties. Check database lifetime and available compute before production scheduling. A sleeping free service cannot guarantee continuous internal scheduling; use explicitly installed Apps Script ticks or adequate always-running capacity after measurements.
+Use render.yaml with the repository root as build directory. Record the verified
+HTTPS RENDER_BASE_URL privately. GroqCloud uses GROQ_API_KEY/GROQ_MODEL, with
+GROQ_PLAN=free and conservative request/token caps. Legacy xAI settings do not select
+the default provider. Keep Render SCHEDULER_ENABLED=false when Cloudflare owns ticks.
 
 ## Google Apps Script
 
-Use the existing project identified by APPS_SCRIPT_SCRIPT_ID. Copy Code.gs, Dashboard.gs, Backups.gs, Controls.gs and appsscript.json from `apps-script/` into that project using the editor or an explicitly configured local clasp project. No web-app deployment is necessary.
+Authenticate clasp interactively with the intended account. Verify access to the
+configured APPS_SCRIPT_SCRIPT_ID, GOOGLE_SPREADSHEET_ID and
+GOOGLE_DRIVE_BACKUP_FOLDER_ID before uploading. Include all files in apps-script/,
+including Delivery.gs. No web-app deployment is necessary.
 
-Set Script Properties from the private configuration:
+Set Script Properties privately:
 
-```text
-RENDER_BASE_URL
-GOOGLE_SPREADSHEET_ID
-GOOGLE_DRIVE_BACKUP_FOLDER_ID
-DASHBOARD_API_TOKEN
-PROCESSOR_TRIGGER_TOKEN
-BACKUPS_ENABLED=false
-DASHBOARD_ENABLED=false
-PROCESSOR_SCHEDULE_ENABLED=false
-```
+- RENDER_BASE_URL
+- GOOGLE_SPREADSHEET_ID
+- GOOGLE_DRIVE_BACKUP_FOLDER_ID
+- DASHBOARD_API_TOKEN
+- PROCESSOR_TRIGGER_TOKEN
+- DELIVERY_ENABLED=false initially
+- BACKUPS_ENABLED=false initially
+- DASHBOARD_ENABLED=false initially
+- PROCESSOR_SCHEDULE_ENABLED=false
 
-The executing Google account must be able to edit the Sheet and create files in the folder. Authorize Drive, Sheets, URL Fetch and trigger-management scopes in the Google UI during Phase 2. No Drive API key/service account is required. Standalone scripts work with the Sheet ID; the onOpen menu needs a Sheet-bound project. Restrict editors and keep the folder/Sheet private.
+Uploading code does not install triggers. In bounded tests, enable delivery and run
+one tiny batch. Verify literal Sheet rows, readback, Drive JSON/CSV copies, exact ACK
+and PostgreSQL deletion. Exercise a tiny configured shard boundary. Run dashboard
+and backup twice to verify repeatability.
 
-In Phase 2, manually run `refreshDashboard` and `dailyBackup` with tiny test exports, then rerun backup to check duplicate prevention. Code load never installs triggers.
+For the explicit autonomous Phase-2 test, install the independent five-minute
+delivery trigger using installDeliveryTrigger after enabling DELIVERY_ENABLED.
+Reporting triggers are separate. Keep Google processor scheduling disabled when
+Cloudflare owns processing. Remove test schedules after recording evidence.
 
-After reporting tests pass, explicitly set BACKUPS_ENABLED and DASHBOARD_ENABLED true and run `installReportingTriggers`. This replaces only its own reporting handlers: dashboard every 15 minutes and backup/resume hourly. Only one completed snapshot per local date is created. Review the backup loss window before Phase 4.
+## Cloudflare
 
-Processing scheduling belongs after Phase 3: set PROCESSOR_SCHEDULE_ENABLED true and run `installProcessorTrigger`. Do not also enable the internal scheduler unless you intend additional ticks. `removeLeadgenTriggers` removes only the named LeadGen handlers.
+CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must come from .env. The current token
+is missing; no plugin fallback is permitted. Verify identity with that token first.
+The Worker processes no lead payloads. Its source and tests are under
+services/cloudflare_coordinator/.
 
-## Activation gates, later only
+Checked-in defaults have no Cron triggers and keep COORDINATOR_ENABLED=false and
+SCHEDULER_OWNER=none. Only a bounded authorized test should temporarily enable Cron,
+COORDINATOR_ENABLED and SCHEDULER_OWNER=cloudflare on the isolated deployment.
+Prove wake, backpressure inspection and one bounded jobs/tick without another owner.
 
-Acquisition requires ACQUISITION_ENABLED, the selected source environment flag, its YAML enabled flag, its authenticated database enable control, and pipeline resume. Processing requires PROCESSING_ENABLED and resume. Grok additionally requires GROK_ENABLED, a supported model/key, credits and bounded caps. No script control bypasses these gates.
+## Exit evidence
 
-Follow [Phase 2](docs/PHASE_2_TESTING.md), then Phase 3's small complete real flow. Phase 4 is the separately approved one-week acquisition.
+Run the local regression and migration checks after fixes. Then prove the tiny
+cloud chain and several cycles with the laptop/local processes off. Rotate exposed
+active credentials once after integration debugging, update private/platform values
+and smoke-test replacements. Record actual evidence in docs/PHASE_2_TEST_REPORT.md.
+
+Phase 3 follows a Phase-2 pass and explicit approval: one small real complete cycle,
+hard caps, isolated data, no outbound email, inspect and stop. Phase 4 is the separately
+approved approximately 200,000-record/seven-day acquisition run.

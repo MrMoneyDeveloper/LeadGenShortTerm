@@ -1,7 +1,9 @@
+from datetime import timedelta
+
 import pytest
 
 from app import jobs
-from app.models import PipelineState
+from app.models import PipelineState, now
 from app.services import campaign
 
 
@@ -38,3 +40,22 @@ def test_active_campaign_cannot_be_started_twice(postgres, isolated_settings):
     campaign.start(raw_target=10, duration_days=7)
     with pytest.raises(campaign.CampaignError, match="campaign_already_active"):
         campaign.start(raw_target=10, duration_days=7)
+
+
+def test_semantic_drain_deadline_is_persisted_and_not_extended(postgres, isolated_settings, monkeypatch):
+    jobs.initialize()
+    campaign.start(raw_target=1)
+    current = now()
+    monkeypatch.setattr(campaign, "now", lambda: current)
+    with postgres() as db:
+        state = db.get(PipelineState, 1)
+        state.campaign_raw_scanned = 1
+        state = campaign.observe(db, 1, 0)
+        assert state.campaign_semantic_deadline == current + timedelta(hours=24)
+    later = current + timedelta(hours=25)
+    monkeypatch.setattr(campaign, "now", lambda: later)
+    with postgres() as db:
+        state = campaign.observe(db, 1, 0)
+        assert state.campaign_semantic_deadline == current + timedelta(hours=24)
+        assert campaign.semantic_expired(state, later)
+        assert not campaign.semantic_expired(state, current)

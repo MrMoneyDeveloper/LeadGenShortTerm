@@ -2,16 +2,23 @@
 
 import json
 import time
+from datetime import timedelta
 
 import httpx
 
 from app.classifiers.grok import SemanticResult, redact
+from app.classifiers.groq_limits import record_response, reserve_request
 from app.config import settings
-from app.repositories import account_tokens, reserve_budget
+from app.models import now
+from app.repositories import account_tokens
 
 
 class GroqUnavailable(Exception):
     """Only application-owned error codes are ever surfaced."""
+
+    def __init__(self, code, retry_at=None):
+        super().__init__(code)
+        self.retry_at = retry_at
 
 
 def classify(text, score):
@@ -40,22 +47,25 @@ def classify(text, score):
         payload["reasoning_effort"] = "low"
     with httpx.Client(timeout=cfg.semantic_timeout_seconds) as client:
         for attempt in range(cfg.semantic_max_attempts):
-            budget = reserve_budget(
-                "groq",
-                1,
-                cfg.groq_daily_request_soft_cap,
-                cfg.groq_daily_token_soft_cap,
-            )
+            # UTF-8 bytes plus framing allowance is a conservative prompt estimate;
+            # reserve the entire allowed completion, including reasoning tokens.
+            tokens = len(json.dumps(payload).encode("utf-8")) + 256 + payload["max_completion_tokens"]
+            budget, retry_at = reserve_request(tokens)
             if budget == "unit_cap":
-                raise GroqUnavailable("groq_daily_request_cap")
+                raise GroqUnavailable("groq_daily_request_cap", _next_day())
             if budget == "token_cap":
-                raise GroqUnavailable("groq_daily_token_cap")
+                raise GroqUnavailable("groq_daily_token_cap", _next_day())
+            if budget != "ok":
+                raise GroqUnavailable("groq_" + budget, retry_at)
             try:
                 response = client.post(
                     "https://api.groq.com/openai/v1/chat/completions", json=payload,
                     headers={"Authorization": "Bearer " + cfg.groq_api_key.get_secret_value()},
                 )
-                if response.status_code == 429 or response.status_code >= 500:
+                retry_at = record_response(response.headers, response.status_code)
+                if response.status_code == 429:
+                    raise GroqUnavailable("groq_rate_limit", retry_at)
+                if response.status_code >= 500:
                     if attempt + 1 == cfg.semantic_max_attempts:
                         raise GroqUnavailable("groq_rate_or_server")
                     try:
@@ -72,6 +82,8 @@ def classify(text, score):
                 if any(type(value) is not int or value < 0 for value in (incoming, outgoing)):
                     raise GroqUnavailable("groq_invalid_usage")
                 cost = (incoming * cfg.groq_input_usd_per_million + outgoing * cfg.groq_output_usd_per_million) / 1e6
+                if cfg.groq_plan == "free":
+                    cost = 0
                 account_tokens("groq", incoming, outgoing, cost)
                 choice = data["choices"][0]
                 if choice.get("finish_reason") != "stop":
@@ -87,3 +99,7 @@ def classify(text, score):
             except (ValueError, KeyError, IndexError, TypeError):
                 raise GroqUnavailable("groq_invalid_json") from None
     raise GroqUnavailable("groq_unavailable")
+
+
+def _next_day():
+    return (now() + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)

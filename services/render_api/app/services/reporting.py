@@ -13,6 +13,7 @@ from app.models import (
     Lead,
     Metric,
     PipelineState,
+    ProviderRateState,
     SourceCursor,
     SourceRecord,
     Usage,
@@ -41,6 +42,15 @@ LEAD_FIELDS = [
 def row_dict(row, fields=None):
     fields = fields or [c.name for c in row.__table__.columns]
     return {name: getattr(row, name) for name in fields}
+
+
+def usage_dict(row):
+    result = row_dict(row)
+    if row.provider == "groq" and settings().groq_plan == "free":
+        result["reference_list_price"] = result.pop("estimated_cost")
+        result["actual_pipeline_cost"] = 0
+        result["plan"] = "free"
+    return result
 
 
 def summary():
@@ -82,7 +92,8 @@ def summary():
                 select(func.min(SourceRecord.created_at)).where(SourceRecord.status == "PENDING")
             ),
             "database_bytes": db.scalar(text("SELECT pg_database_size(current_database())")),
-            "api_usage": [row_dict(u) for u in db.scalars(select(Usage).order_by(Usage.day.desc()).limit(12))],
+            "api_usage": [usage_dict(u) for u in db.scalars(select(Usage).order_by(Usage.day.desc()).limit(12))],
+            "provider_rate_state": [row_dict(r) for r in db.scalars(select(ProviderRateState))],
             "grok_cost_configured": bool(cfg.grok_input_usd_per_million and cfg.grok_output_usd_per_million),
         }
 

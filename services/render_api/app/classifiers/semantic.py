@@ -5,7 +5,9 @@ from app.config import settings
 
 
 class SemanticUnavailable(Exception):
-    pass
+    def __init__(self, code, retry_at=None):
+        super().__init__(code)
+        self.retry_at = retry_at
 
 
 def provider():
@@ -21,4 +23,4 @@ def classify(text, score):
     try:
         return client.classify(text, score)
     except (groq.GroqUnavailable, grok.GrokUnavailable) as exc:
-        raise SemanticUnavailable(str(exc)) from None
+        raise SemanticUnavailable(str(exc), getattr(exc, "retry_at", None)) from None
