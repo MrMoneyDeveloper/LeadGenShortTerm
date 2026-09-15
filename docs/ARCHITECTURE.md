@@ -71,6 +71,13 @@ Render sleeps/restarts. Production collection is denied unless the campaign is a
 A new campaign refuses to start while transient raw/candidate/final rows or an unacknowledged delivery
 batch remain, preventing campaign cross-contamination.
 
+Migration `0005_semantic_drain_deadline` adds a fixed semantic grace-period deadline
+to pipeline state (no new table). Once draining is observed, ambiguous candidates
+have `CAMPAIGN_SEMANTIC_DRAIN_HOURS` (default 24) to finish within available quota.
+Afterward, cleanup can retire already-ranked semantic candidates even when their
+quota retry timestamp lies in the future. This prevents endless quota deferral from
+blocking completion. Final leads and unacknowledged delivery batches remain protected.
+
 ## Delivery contract
 
 `POST /exports/claim` locks pipeline state and replays an outstanding immutable batch or allocates up
@@ -98,6 +105,14 @@ installed five-minute trigger can drain one bounded batch per invocation indepen
 scheduling. Dashboard and backup triggers remain separate.
 
 ## Semantic provider and free-tier protection
+
+**September 15 implementation update:** migration `0004_provider_rate_state` adds a
+15th application table, `provider_rate_state`, holding provider-wide rolling windows,
+daily reservations, header limits/remaining/reset values and cooldowns. This supersedes
+the daily-only admission description below. Requests reserve conservative prompt plus
+completion tokens before HTTP. Quota waits persist without consuming candidate failure
+attempts. Free-plan reporting distinguishes zero configured Groq cost from historical
+reference list-price arithmetic. See the current configuration reference and test report.
 
 `SEMANTIC_PROVIDER=groq` is the default. GroqCloud and xAI/Grok are separate providers.
 

@@ -37,7 +37,8 @@ def setup_client(cfg, monkeypatch, responses):
             return responses.pop(0)
 
     monkeypatch.setattr(groq.httpx, "Client", Client)
-    monkeypatch.setattr(groq, "reserve_budget", lambda *args: reservations.append(args) or "ok")
+    monkeypatch.setattr(groq, "reserve_request", lambda *args: reservations.append(args) or ("ok", None))
+    monkeypatch.setattr(groq, "record_response", lambda *_args: groq._next_day())
     monkeypatch.setattr(groq, "account_tokens", lambda *args: accounting.append(args))
     monkeypatch.setattr(groq.time, "sleep", lambda _delay: None)
     return calls, reservations, accounting
@@ -60,27 +61,29 @@ def test_groq_strict_payload_redaction_and_estimated_accounting(isolated_setting
     assert calls[0]["url"] == "https://api.groq.com/openai/v1/chat/completions"
     assert calls[0]["body"]["response_format"]["json_schema"]["strict"]
     assert "person@example.org" not in calls[0]["body"]["messages"][1]["content"]
-    assert reservations == [("groq", 1, 2, 5000)]
-    assert accounting == [("groq", 100, 20, 0.00014)]
+    assert len(reservations) == 1 and reservations[0][0] > 1024
+    assert accounting == [("groq", 100, 20, 0)]
 
 
 def test_groq_rate_retry_caps_and_strict_rejection(isolated_settings, monkeypatch):
     calls, reservations, _ = setup_client(isolated_settings, monkeypatch, [Response(429), Response()])
-    groq.classify("Ambiguous", 80)
-    assert len(calls) == len(reservations) == 2
+    with pytest.raises(groq.GroqUnavailable, match="groq_rate_limit") as exc:
+        groq.classify("Ambiguous", 80)
+    assert exc.value.retry_at is not None
+    assert len(calls) == len(reservations) == 1
 
     setup_client(isolated_settings, monkeypatch, [Response(content={**result(), "is_consumer": "true"})])
     with pytest.raises(groq.GroqUnavailable, match="groq_invalid_json"):
         groq.classify("Ambiguous", 80)
 
     calls, _, _ = setup_client(isolated_settings, monkeypatch, [Response()])
-    monkeypatch.setattr(groq, "reserve_budget", lambda *_args: "unit_cap")
+    monkeypatch.setattr(groq, "reserve_request", lambda *_args: ("unit_cap", groq._next_day()))
     with pytest.raises(groq.GroqUnavailable, match="groq_daily_request_cap"):
         groq.classify("Ambiguous", 80)
     assert not calls
 
     calls, _, _ = setup_client(isolated_settings, monkeypatch, [Response()])
-    monkeypatch.setattr(groq, "reserve_budget", lambda *_args: "token_cap")
+    monkeypatch.setattr(groq, "reserve_request", lambda *_args: ("token_cap", groq._next_day()))
     with pytest.raises(groq.GroqUnavailable, match="groq_daily_token_cap"):
         groq.classify("Ambiguous", 80)
     assert not calls

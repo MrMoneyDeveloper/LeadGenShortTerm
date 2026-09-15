@@ -33,6 +33,14 @@ campaign in `RUNNING` state.
 
 ## Campaign controller
 
+`CAMPAIGN_SEMANTIC_DRAIN_HOURS` defaults to 24 (range 0–168). Migration
+`0005_semantic_drain_deadline` persists a fixed semantic-work deadline when a
+draining campaign is first observed. Restarts and subsequent progress do not extend
+it. Ranked ambiguous candidates can use available quota until then; afterward,
+bounded cleanup retires that unfinished semantic work. Raw records, contact-validation
+work and final leads awaiting verified delivery remain protected. The campaign still
+waits for those protected stages to finish; this is not a forced delivery timeout.
+
 | Variable | Default / use |
 |---|---|
 | `CAMPAIGN_ID` | `phase2`; stable ID placed in final delivery rows |
@@ -49,6 +57,31 @@ A new campaign refuses to start while transient source/candidate/lead rows or an
 Google delivery batch remain. This prevents one run from inheriting another run's working payloads.
 
 ## GroqCloud semantic provider
+
+### September 15 rate-control update
+
+Migration `0004_provider_rate_state` is required before running the updated client.
+`GROQ_PLAN` defaults to `free`. New limits default to `GROQ_RPM_LIMIT=30`,
+`GROQ_RPD_LIMIT=1000`, `GROQ_TPM_LIMIT=8000`, `GROQ_TPD_LIMIT=200000`,
+`GROQ_RPM_SOFT_CAP=24`, and `GROQ_TPM_SOFT_CAP=6500`.
+The effective limits also respect smaller provider headers when supplied.
+
+The client reserves a conservative UTF-8 prompt estimate plus framing allowance and
+the full completion ceiling before each attempt. Reservations are not refunded,
+including failed/ambiguous calls; actual returned input/output usage is tracked separately.
+This is deliberately conservative and needs a live throughput benchmark before tuning.
+Rolling 60-second reservations, daily reservations, response headers, 429 counts,
+deferral counts and cooldowns persist in `provider_rate_state`. Daily counters use UTC;
+provider cooldowns and reset timestamps survive midnight and restarts.
+
+Quota waits preserve candidate attempts and set the durable candidate availability time.
+Oversized prompts take the bounded failure/review path instead of deferring forever.
+Single-record inference remains the default; batching requires a measured benefit.
+Free-plan dashboard usage reports `actual_pipeline_cost=0`; historical list-price
+arithmetic is exposed only as `reference_list_price`. Other platform costs are not included.
+
+The daily token admission description below predates this update: admission now uses
+reserved upper-bound estimates, rather than waiting for actual usage to cross the cap.
 
 GroqCloud is the default semantic provider and is intentionally separate from xAI/Grok.
 

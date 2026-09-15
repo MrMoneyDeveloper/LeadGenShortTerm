@@ -57,6 +57,7 @@ class PipelineState(Base):
     campaign_raw_scanned: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     campaign_last_progress_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     campaign_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    campaign_semantic_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     export_next_position: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     export_spreadsheet_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
@@ -176,6 +177,12 @@ class Metric(Base):
     source: Mapped[str] = mapped_column(String(32), primary_key=True)
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[float] = mapped_column(Float, default=0)
+
+
+class ProviderRateState(Base):
+    __tablename__ = "provider_rate_state"
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    state: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
 class Usage(Base):

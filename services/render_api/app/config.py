@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     campaign_id: str = Field("phase2", pattern=r"^[A-Za-z0-9_-]{1,64}$")
     campaign_duration_days: int = Field(7, ge=1, le=30)
     campaign_raw_target: int = Field(200_000, ge=1, le=10_000_000)
+    campaign_semantic_drain_hours: int = Field(24, ge=0, le=168)
     # Legacy/manual safety ceiling. New campaigns do not require this value.
     campaign_deadline: datetime | None = None
 
@@ -55,6 +56,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GROQ_API_KEY", "XAI_API_KEY", "groq_api_key"),
     )
     groq_model: str = ""
+    groq_plan: Literal["free", "paid"] = "free"
+    groq_rpm_limit: int = Field(30, ge=1)
+    groq_rpd_limit: int = Field(1000, ge=1)
+    groq_tpm_limit: int = Field(8000, ge=1)
+    groq_tpd_limit: int = Field(200000, ge=1)
+    groq_rpm_soft_cap: int = Field(24, ge=0)
+    groq_tpm_soft_cap: int = Field(6500, ge=0)
     groq_daily_request_soft_cap: int = Field(
         800,
         ge=0,

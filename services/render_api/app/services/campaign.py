@@ -29,6 +29,7 @@ def payload(state):
         "raw_remaining": max(0, target - scanned) if target else None,
         "last_progress_at": state.campaign_last_progress_at,
         "completed_at": state.campaign_completed_at,
+        "semantic_deadline": state.campaign_semantic_deadline,
         "paused": state.paused,
     }
 
@@ -69,6 +70,7 @@ def start(raw_target=None, duration_days=None):
         state.campaign_raw_scanned = 0
         state.campaign_last_progress_at = started
         state.campaign_completed_at = None
+        state.campaign_semantic_deadline = None
         state.paused = False
         state.draining = False
         state.storage_pressure = False
@@ -120,8 +122,17 @@ def observe(db, total_work_rows, claimed_batches):
         state.draining = False
         state.paused = True
 
+    if state.campaign_status in {"DRAINING", "FINALIZING"} and state.campaign_semantic_deadline is None:
+        state.campaign_semantic_deadline = current + timedelta(hours=settings().campaign_semantic_drain_hours)
+
     state.updated_at = current
     return state
+
+
+def semantic_expired(state, current):
+    return bool(state and state.campaign_status in {"DRAINING", "FINALIZING"}
+                and state.campaign_semantic_deadline is not None
+                and current >= state.campaign_semantic_deadline)
 
 
 def status():

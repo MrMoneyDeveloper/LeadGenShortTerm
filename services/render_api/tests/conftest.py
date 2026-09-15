@@ -67,7 +67,7 @@ def postgres(isolated_settings, monkeypatch):
     Base.metadata.create_all(eng)
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
-        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0003_campaign_lifecycle')"))
+        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0005_semantic_drain_deadline')"))
 
     @contextmanager
     def local_session():
