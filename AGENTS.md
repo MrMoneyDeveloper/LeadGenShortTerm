@@ -1,188 +1,257 @@
 # AGENTS.md
 
-Instructions for Codex and other coding agents working in this repository.
+Mandatory instructions for Codex and any other coding agent working in this repository.
+
+## Read this first
+
+Before doing anything else, read in this order:
+
+1. `RUNTIME_AGENT_CONTRACT.md`
+2. `docs/ARCHITECTURE.md`
+3. `docs/PHASE_2_TEST_REPORT.md`
+4. `docs/CONFIGURATION.md`
+5. `docs/PHASE_2_TESTING.md`
+
+`RUNTIME_AGENT_CONTRACT.md` is authoritative for account selection, external tools, GroqCloud Free-tier behavior, and Phase-2 execution safety.
+
+Historical prompts/reports may describe older architecture. Do not resurrect retired behavior merely because an old document mentions it.
 
 ## Current milestone
 
-Phase 1 now includes both Bluesky and YouTube, Google Apps Script dashboard and Google Drive
-daily useful-data backups. The code build is complete; **do not run tests, migrations, real
-collection, inference, Google writes, or production schedules until the user starts Phase 2**.
-Static syntax/lint/build checks are allowed. Read `docs/PHASE_2_TESTING.md` before that phase.
-`docs/ARCHITECTURE.md` is authoritative; the root historical architecture is superseded.
+The project is in **Phase 2 controlled runtime validation**.
 
-Build the **data acquisition and qualification engine only**.
+The architecture is already built. Do not redesign it again unless a test proves a concrete defect.
 
-Do not implement production outbound email yet.
+Do not start Phase 3, the real seven-day campaign, or outbound email.
 
-The target first milestone is:
+## Non-negotiable external-account rule
+
+**Use the ignored repository-root `.env` and repository configuration as the source of truth.**
+
+Do not use connected runtime/platform plugins/connectors to choose or mutate external accounts.
+
+This specifically applies to Render, Cloudflare, Google/Apps Script resources, and AI-provider runtime access.
+
+If an `.env` credential/ID is missing, rejected, or mismatched, stop that integration step and report the blocker. **Never fall back to whatever account a plugin happens to expose.**
+
+Before every external mutation, perform a read-only identity/resource verification using the same `.env` credential that will perform the mutation.
+
+## Current architecture
 
 ```text
-source
-  -> collect
-  -> checkpoint
-  -> normalize
-  -> filter
-  -> dedupe
-  -> score
-  -> classify uncertain cases
-  -> validate email
-  -> store useful candidate
-  -> export
+public source adapters
+  -> bounded collection + source profile
+  -> Render FastAPI processing
+  -> PostgreSQL temporary durable queues/checkpoints
+  -> deterministic short-term-insurance rules
+  -> contact extraction + syntax/DNS/MX validation
+  -> local TF-IDF/logistic model + ranking
+  -> DIRECT_FINAL / REJECT where clear
+  -> selective GroqCloud Free-tier semantic classification for high-ranked ambiguity
+  -> final lead queue
+  -> Apps Script final delivery
+  -> Google Sheets VALIDATED_### shards
+  -> verified Google Drive receipt/backup
+  -> delivery ACK
+  -> transient PostgreSQL payload cleanup
 ```
 
-## Architecture rules
+Cloudflare is the primary lightweight wake/scheduling coordinator when enabled. It does not process lead payloads.
 
-1. Render Web Service is the Python processing runtime for the MVP.
-2. Render PostgreSQL is the temporary operational database for the MVP.
-3. Do not add Cloudflare R2/D1 unless explicitly requested.
-4. Do not use Google Sheets as the raw database.
-5. Do not store full raw payloads indefinitely.
-6. Delete rejected raw material after processing or after the configured short retention period.
-7. Keep source cursors/checkpoints so a failed run resumes rather than restarts.
-8. Every source adapter must be independently enabled/disabled.
-9. Every batch must be idempotent and safely retryable.
-10. Search terms and scoring rules belong in configuration files, not hard-coded collectors.
+Google Apps Script performs final delivery/dashboard/backup/watchdog work. It is not the raw-data processing engine.
 
-## AI usage rules
+PostgreSQL is a conveyor belt and durable operational state store, not a permanent raw archive.
 
-1. Run deterministic filters before LLM classification.
-2. Prefer a lightweight local classifier when enough labelled examples exist.
-3. Use Grok only for semantic ambiguity / high-value classification.
-4. Require structured JSON output from Grok.
-5. Do not send unnecessary personal data to Grok.
-6. Do not use Grok for email syntax, DNS, MX, dedupe, or keyword checks.
+## GroqCloud
+
+The default semantic provider is **GroqCloud**, not xAI.
+
+Canonical configuration:
+
+```text
+SEMANTIC_PROVIDER=groq
+GROQ_ENABLED=
+GROQ_API_KEY=
+GROQ_MODEL=
+```
+
+The user intentionally uses the **GroqCloud Free tier**.
+
+Do not treat token accounting as billing. Tokens/requests are tracked primarily to stay inside free-tier limits.
+
+Current published GPT-OSS Free-tier constraints and required runtime behavior are pinned in `RUNTIME_AGENT_CONTRACT.md`. The implementation must also honor actual provider response headers/account limits because platform limits can change.
+
+GroqCloud is selective. Never send all raw records to it.
+
+Do not use GroqCloud for:
+
+- hard email syntax validation
+- DNS/MX validation
+- dedupe
+- keyword checks
+- contact invention
+- name invention
+
+When GroqCloud rate limits are reached, defer semantic work and continue the rest of the pipeline.
 
 ## Data-retention rules
-
-Default philosophy:
 
 ```text
 raw -> short-lived
 rejected -> delete
 candidate -> temporary
-validated lead -> retain through campaign/export lifecycle
-dedupe hash -> long-lived
-suppression hash -> long-lived once outbound exists
+direct/final lead -> retain only until verified Google delivery ACK
+exported heavy payload -> delete after ACK
+campaign dedupe/checkpoint/compact receipts -> retain as required for idempotency
 ```
 
-Initial config should support:
+Do not create an archive of rejected/raw source material.
 
-```text
-RAW_RETENTION_DAYS=3
-DELETE_REJECTED_RAW=true
-```
-
-Do not create an archive of all collected source data unless explicitly requested.
+Preserve bounded source provenance needed to explain where a final lead came from.
 
 ## Database rules
 
-Use migrations.
+Use explicit Alembic migrations.
 
-At minimum implement:
+Never use `create_all()` as proof that migration drift is clean.
+
+Keep large source payloads out of final/candidate state where possible.
+
+Every durable stage must be idempotent/restartable.
+
+A failed/retried batch must not duplicate final leads.
+
+Backpressure must stop/reduce acquisition before PostgreSQL storage/queues become unsafe.
+
+## Final lead rules
+
+The finished dataset belongs in sharded Google Sheet tabs such as:
 
 ```text
-source_cursors
-processing_jobs
-identity_index
-candidates
+VALIDATED_001
+VALIDATED_002
+VALIDATED_003
 ```
 
-Keep giant source payloads out of `candidates`.
+Drive holds verified delivery copies/backups.
 
-Prefer hashes/short evidence fields over duplicated full documents.
+Final lead data should include, where available:
+
+```text
+email
+first_name
+salutation
+source
+source_evidence
+source_url
+product_type
+rank/score
+validation status
+stable lead/campaign IDs
+```
+
+Name is optional.
+
+Reliable first name:
+
+```text
+Good day Mohammed,
+```
+
+No reliable name:
+
+```text
+Good day,
+```
+
+Never infer a name merely from an email username, handle, company slug, or uncertain model guess.
+
+## Source and ranking rules
+
+This project targets **South African short-term insurance** leads.
+
+Search terms, product terms, exclusions, South African signals, and ranking weights belong in repository configuration/fixtures rather than collector source code.
+
+Test ranking quality, not merely API success.
+
+Strong consumer quote/switch/recommendation intent should outrank generic discussion.
+
+Broker advertising, recruitment, news, and non-target insurance categories should rank low or reject as configured.
+
+South African context is a positive signal, not an automatic reason to fabricate location.
 
 ## Secrets
 
-Never commit:
+Never commit or print secrets.
+
+Examples include:
 
 ```text
 DATABASE_URL
+RENDER_API_KEY
+GROQ_API_KEY
 XAI_API_KEY
 YOUTUBE_API_KEY
-Render credentials
+CLOUDFLARE_API_TOKEN
 Google credentials
 MWEB credentials
 API bearer tokens
 ```
 
-Provide `.env.example` with empty placeholders only.
+`.env.example` / `env.example` contain empty placeholders only.
 
-## Initial API
-
-Implement only what is useful for the data phase:
-
-```http
-GET  /health
-POST /jobs/run-batch
-GET  /jobs/{batch_id}
-GET  /metrics/summary
-GET  /leads/validated
-GET  /export/validated.csv
-```
-
-Authentication should be added before exposing any destructive or administrative endpoint.
-
-## Source implementation order
-
-Start with one source.
-
-Preferred order:
-
-```text
-1. Bluesky Jetstream
-2. YouTube
-3. approved public-web adapters
-```
-
-Do not implement multiple broken scrapers in parallel.
+Do not display secret-bearing URLs in logs/reports.
 
 ## Testing
 
-Add tests for:
+For meaningful changes, run the relevant tests and then a complete final regression pass before merge.
+
+At minimum the Phase-2 branch expects:
 
 ```text
-normalisation
-dedupe
-scoring
-email validation
-cursor advancement
-batch retry/idempotency
-Grok JSON parsing
-cleanup/retention
+python -m pytest
+python -m ruff check .
+git diff --check
+python -m alembic -c services/render_api/alembic.ini check
+node tests/apps_script_harness.cjs
 ```
 
-A failed batch must not duplicate accepted candidates when retried.
+Also run Cloudflare coordinator tests/checks when that service changes.
+
+Use only disposable/isolated PostgreSQL for destructive migration testing.
 
 ## Scaling
 
-Begin with:
-
-```text
-600 records/batch (use 1–5 for Phase-2 source checks)
-```
-
-Scale only after the entire flow completes reliably.
-
-The long-term acquisition target is approximately:
+The eventual acquisition target is approximately:
 
 ```text
 200,000 raw records over 7 days
 ```
 
-This is a processing-throughput target, not a requirement to permanently store 200,000 rows.
+That is a throughput target, not a retained-row requirement.
+
+Process continuously:
+
+```text
+collect -> qualify -> deliver -> ACK -> cleanup -> collect more
+```
+
+Do not accumulate 200,000 raw rows in PostgreSQL.
+
+## Scheduling/autonomy
+
+The real campaign must eventually run without the user's laptop.
+
+Cloudflare may wake/orchestrate Render.
+
+Apps Script independently handles delivery/dashboard/backup schedules.
+
+Persist state so Render sleep/restart does not lose progress.
+
+Do not install production schedules during Phase 2 merely because scheduling code exists.
 
 ## Outbound email
 
-Do not add MWEB SMTP, consent-request sending, or forwarding automation until explicitly requested after the data MVP has been reviewed.
+Do not implement or enable production outbound email, MWEB sending, or forwarding automation during this phase.
 
-## Implemented operational rules
-
-- Keep acquisition, processing, source, Grok and scheduler defaults disabled; the database starts paused.
-- Keep both example environment files empty. Actual local configuration is in ignored `.env`.
-- Google Sheets is a values dashboard capped to samples; Google Drive holds paginated useful-lead CSV/JSON exports.
-- Never invoke Apps Script trigger installation just because its code exists.
-- Migrations are explicit, versioned and absent from application startup.
-- Preserve durable job/cursor/hash atomicity and PostgreSQL advisory executor ownership.
-- Do not add external messaging or outbound libraries during this phase.
-
-If outbound work is later added, compliance/suppression state must be treated as durable system state and never bypassed.
+If outbound work is later authorized, compliance/suppression state becomes durable system state and must never be bypassed.
