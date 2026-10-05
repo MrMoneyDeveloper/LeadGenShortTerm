@@ -1,6 +1,6 @@
 # Phase 2 — controlled testing procedure
 
-Do not skip directly to the seven-day run. This procedure was partially executed on 2026-09-13;
+Do not skip directly to the seven-day run. Controlled validation continued on 2026-10-05;
 results and remaining gates are recorded in [PHASE_2_TEST_REPORT.md](PHASE_2_TEST_REPORT.md).
 
 ## 1. Prepare isolated configuration
@@ -18,9 +18,11 @@ $env:PROCESSING_ENABLED='false'
 $env:BLUESKY_ENABLED='false'
 $env:YOUTUBE_ENABLED='false'
 $env:GROK_ENABLED='false'
+$env:GROQ_ENABLED='false'
+$env:SEMANTIC_PROVIDER='groq'
 $env:SCHEDULER_ENABLED='false'
 $env:PROCESSING_BATCH_SIZE='5'
-$env:GROK_DAILY_CANDIDATE_CAP='2'
+$env:GROQ_DAILY_REQUEST_SOFT_CAP='2'
 ```
 
 Replace placeholders privately; never save real URLs/tokens in this document or terminal transcripts.
@@ -32,7 +34,7 @@ Replace placeholders privately; never save real URLs/tokens in this document or 
 ```
 
 These cover normalization/hashes/scoring/recency/geography, contact syntax/MX with fake DNS,
-Grok JSON validation/redaction, mocked Bluesky checkpointing, YouTube quota stop, and CSV injection.
+Groq JSON validation/redaction and quota deferral, mocked Bluesky checkpointing, YouTube quota stop, and CSV injection.
 No real source or AI calls should occur. Tests override `.env` and use fake providers.
 
 ## 3. Migrations and transactional tests
@@ -61,7 +63,7 @@ Verify no automatic work occurs without explicit executor/scheduler calls.
 ## 5. Tiny source checks, individually
 
 Use a temporary CONFIG_DIR copy with only one source enabled at a time. Set that source environment
-flag and ACQUISITION_ENABLED true; keep processing and Grok off. Enable the database source control,
+flag and ACQUISITION_ENABLED true; keep processing and Groq off. Enable the database source control,
 resume the pipeline, enqueue `collect` with `batch_size=1` or `5`, then call process-next once.
 
 For Bluesky, verify the configured host accepts the legacy protocol, bounded timeout, saved cursor,
@@ -74,9 +76,9 @@ Do not use broad discovery until a later controlled check. Pause and disable acq
 
 Enable processing only. Advance normalize with explicit jobs. Inspect deterministic rejection and
 short evidence/provenance. Validate local-model absent behaviour; train only after enough labelled
-examples exist. Enable Grok for at most 1–2 ambiguous, de-identified examples with an explicit tiny
+examples exist. Enable Groq for at most 1–2 ambiguous, de-identified examples with an explicit tiny
 cap. Verify structured JSON, retry/cap counters, token accounting and REVIEW on unavailability.
-Disable Grok afterwards. Test public-contact DNS with a tiny sample, null MX/disposable cases and
+Disable Groq afterwards. Test public-contact DNS with a tiny sample, null MX/disposable cases and
 transient failures. Verify domain validation is never labelled mailbox confirmation.
 
 ## 7. Google dashboard and Drive
@@ -94,9 +96,29 @@ values in an isolated recovery exercise; do not assume CSV backups are full data
 ## 8. Restart, concurrency and retention
 
 Interrupt a running tiny job, restart, and request execution. Verify reclaim, monotonic source cursor,
-no duplicate candidates/leads and conservative paid-call accounting. Send two executor requests and
+no duplicate candidates/leads and conservative Free-tier quota accounting. Send two executor requests and
 confirm one advisory-lock owner. Check same-key enqueue, duplicate email across identities, and old
 raw/candidate cleanup without deleting unfinished raw or validated leads. Inspect oldest-pending alerts.
+
+## 9. Live shard rollover and cloud scheduling
+
+The first delivery permanently binds its destination and shard size in PipelineState.
+Do not reduce SHEET_SHARD_ROWS or reset the allocation position on a used destination.
+Use an explicitly configured isolated test delivery state and test Sheet, set a two-row
+shard before its first claim, and deliver three synthetic leads. Verify two records in
+VALIDATED_001 and one in VALIDATED_002, exact readback, Drive receipts, replay safety,
+and ACK cleanup. Preserve the earlier successful delivery receipts.
+
+For the Cloudflare scheduling gate, first verify the configured account and exact Render
+test service. Keep source, acquisition, processing, model, delivery and local scheduler
+flags off, with empty queues. Deploy the coordinator with a short COORDINATOR_EXPIRES_AT,
+attach a sanitized live tail, and temporarily install Cron. Observe a scheduled paused
+result, briefly resume the empty runtime, then require a scheduled tick_requested result
+and inspect the durable Render job outcome. Restore pause, remove Cron, disable the
+coordinator and its HTTP route, and verify final state even if the test fails.
+
+This empty-queue scheduler proof does not replace the bounded full pipeline or laptop-off
+tests. Record each independently; a successful HTTP request is not proof of lead quality.
 
 ## Exit gate
 

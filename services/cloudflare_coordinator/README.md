@@ -6,7 +6,8 @@ Apps Script delivers finished leads to Sheet shards and Drive, then acknowledges
 The Worker has no source adapters, raw-data storage, Google tokens or inference keys.
 
 The checked-in configuration is disabled, has **no cron triggers**, and exposes no workers.dev
-or preview route. No Cloudflare deployment or account action is part of this change.
+or preview route. Live controlled test evidence and restored cloud state are recorded in
+`docs/PHASE_2_TEST_REPORT.md`; checked-in defaults remain inert.
 
 ## One bounded invocation
 
@@ -40,6 +41,7 @@ do not infer either from a previously connected platform session.
 | COORDINATOR_ENABLED | Exactly `true` to allow outbound calls; defaults disabled |
 | COORDINATOR_ALLOW_PRODUCTION | Additional explicit `true` gate for production; defaults disabled |
 | SCHEDULER_OWNER | Exactly `cloudflare` to allow outbound calls; defaults `none` |
+| COORDINATOR_EXPIRES_AT | Optional ISO timestamp for bounded tests; invalid values fail closed and expired runs make no outbound requests |
 | RENDER_BASE_URL | Exact HTTPS origin, with no credentials, path, query or fragment |
 | DASHBOARD_API_TOKEN | Render read token; secret, 32–4096 characters |
 | PROCESSOR_TRIGGER_TOKEN | Render job token; secret, 32–4096 characters |

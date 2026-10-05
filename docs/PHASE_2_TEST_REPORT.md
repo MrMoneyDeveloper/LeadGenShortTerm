@@ -1,8 +1,77 @@
-# Phase 2 controlled test report — updated 2026-09-30
+# Phase 2 controlled test report — updated 2026-10-05
 
 ## Verdict
 
 PHASE_2_STATUS=INCOMPLETE
+
+## Current evidence — October 5
+
+The two-lead live Google delivery gate now passes. The approved diagnostic found
+that only rank_score differed: Google coerced numeric-looking text despite the
+rich-text write. Delivery now sets number format to plain text before writing,
+preserving decimal precision and leading zeroes. Exact readback and formula guards
+remain mandatory; comparison was not weakened to numeric equality.
+
+The corrected Apps Script code was uploaded and read back for verification, and
+the temporary diagnostic was removed. After clearing only the user-approved,
+backed-up disposable range VALIDATED_001!A2:Q3, the immutable batch succeeded:
+
+- Sheet write and exact readback passed.
+- Drive JSON/CSV copies were written and JSON checksum readback passed.
+- Render receipt became ACKNOWLEDGED at 2026-10-05 07:23:58 UTC.
+- Runtime counters changed from two queued final leads and zero delivered to
+  zero queued final leads and two delivered. Both transient lead payloads were
+  deleted under the authorized ACK cleanup. Final copies remain in Google.
+- A repeat delivery returned IDLE with no final leads awaiting delivery.
+- Backup of the completed Sheet succeeded at 07:26:31 UTC with one part.
+- Repeating that backup succeeded at 14:28:47 UTC with the same one-part snapshot.
+- Final Render verification returned HTTP 200: paused=true, all execution flags
+  false, zero raw/candidate/final queued records, and two delivered. The local
+  disposable regression database was stopped after testing.
+
+Regression on October 5: 91 Python tests passed (40.58 seconds, two existing
+dependency deprecation warnings); 15 Apps Script mock tests passed, including
+numeric-text coercion; 21 Worker tests passed after the bounded-expiration change; Ruff passed; Alembic reported no
+schema drift against the isolated local test database; Git whitespace check passed.
+The deployed Render code remains its earlier commit; local Groq quota changes and
+migrations 0004/0005 still need their separately verified deployment.
+
+### October 5 live Cloudflare Cron evidence
+
+Deployed the updated Worker to the configured test account with an optional
+COORDINATOR_EXPIRES_AT guard and a 20-minute expiry. The guard uses actual execution
+time, fails closed for invalid expiry, and checks the deadline before every request.
+Three added unit tests cover delayed Cron events and expiry between requests.
+
+Installed a temporary every-minute Cron with its public HTTP route disabled. Live
+scheduled-event logs proved pause handling first: two upstream requests, paused mode,
+and zero raw/candidate/export queues. Briefly resumed the empty Render test runtime;
+all acquisition, processing, source, model, delivery and local scheduler flags stayed off.
+Three subsequent scheduled events reached the third request but returned
+tick_unconfirmed after the Worker's bounded timeout. No manual job tick was sent.
+
+Render's durable job history independently proves execution: one new cleanup job was
+created at 14:52:05 UTC and completed at 14:52:21 UTC in one attempt. The completed-job
+count rose from three to four and stayed at four after the next scheduled request.
+Thus Cron-to-executor execution and observed deduplication pass, but a confirmed
+HTTP-202 tick response within the ten-second request budget remains unresolved.
+Do not widen the timeout or claim full orchestration success without investigating
+the deployed synchronous schedule_tick path and verifying the response latency.
+
+Ended the bounded test and explicitly verified cleanup: Render paused=true, zero
+raw/candidate/final queues, two delivered, no Cron schedules, coordinator disabled,
+and workers.dev/preview routes disabled. The temporary live tail was removed.
+Sanitized execution/job evidence is saved in the ignored local test-runtime folder.
+
+Remaining live gates: isolated shard rollover, confirmed Cloudflare tick response,
+bounded autonomous source-to-output campaign, laptop-off proof, and final credential
+replacement. The used delivery state locks its destination/shard size, so the rollover
+test requires isolated state; do not reset the successful delivery's allocation.
+Cloudflare schedules and routes are disabled after the October 5 test. No production acquisition or
+outbound email has been enabled.
+
+The dated sections below retain the earlier investigation and are historical where
+they describe missing credentials, pending Google consent, or the resolved row conflict.
 
 ## September 30 live delivery and Worker test
 
@@ -51,8 +120,9 @@ Render health and authenticated summary returned 200 after one wake timeout:
 paused=true, every execution flag=false, validated=2, delivered=0.
 Live delivery, ACK/cleanup and Cloudflare orchestration still require execution.
 
-The local implementation and automated regression pass. Live cloud orchestration,
-Google delivery, laptop-off operation and credential replacement remain unverified.
+The local implementation, automated regression and two-lead Google delivery pass.
+Autonomous cloud orchestration, laptop-off operation and credential replacement
+remain unverified.
 Do not infer production readiness from local test results.
 
 ## Evidence and provenance
