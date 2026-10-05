@@ -29,7 +29,8 @@ def main():
             return
         data = response.json()
         data = data.get('owner', data)
-        if data.get('id') != owner or data.get('name') != cfg.get('RENDER_WORKSPACE_NAME'):
+        expected_name = cfg.get('RENDER_WORKSPACE_NAME')
+        if data.get('id') != owner or (expected_name and data.get('name') != expected_name):
             raise ValueError('workspace_identity_mismatch')
         print('workspace_identity: verified configured test workspace')
         matches = []

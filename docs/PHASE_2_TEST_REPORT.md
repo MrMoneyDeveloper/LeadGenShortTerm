@@ -1,8 +1,55 @@
-# Phase 2 controlled test report — 2026-09-15
+# Phase 2 controlled test report — updated 2026-09-30
 
 ## Verdict
 
 PHASE_2_STATUS=INCOMPLETE
+
+## September 30 live delivery and Worker test
+
+- Temporarily enabled final delivery on the verified Render test service with a
+  two-record export batch. Acquisition, processing and scheduling stayed off.
+- The real Apps Script delivery ran and stopped with DELIVERY_ROW_CONFLICT.
+  One immutable batch remains CLAIMED with count=2 and no acknowledgment.
+  Both final leads remain in PostgreSQL. Existing Sheet rows were protected.
+- Google metadata verification succeeds, but direct Sheets read and Drive workbook
+  export using the cached clasp authorization returned HTTP 403. The signed-in
+  browser can open the current configured Sheet. Conflict contents remain unverified.
+- Live dailyBackup succeeded twice at 18:12:49 and 18:13:29 UTC, with one part.
+  This backs up the existing Sheet; it does not prove the pending batch was delivered.
+- Deployed leadgen-coordinator-test directly to the verified configured account,
+  using the checked-in Worker and private secret bindings. No Cron was installed.
+- Worker health returned 200 after initial route propagation; unauthenticated tick
+  returned 401; authenticated tick returned 200 with status=paused, requests=2,
+  raw=0, candidates=0, exports=2 and export_required=true. This proves cloud-to-cloud
+  health/backpressure access and pause handling, not jobs/tick or autonomous progress.
+- Disabled the temporary Worker HTTP route after verification. The Worker remains
+  deployed without Cron. Requested restoration of Render's original disabled delivery
+  gate and export batch size; final deployment verification is recorded separately.
+- Further delivery needs resolution of occupied destination rows without data loss.
+- The user confirmed existing destination rows are disposable. Cleared only the
+  batch's reserved VALIDATED_001!A2:Q3 range after the successful Drive backup.
+  Retrying the immutable batch again returned DELIVERY_ROW_CONFLICT. This means
+  the conflict cannot yet be attributed solely to old data; write/readback behavior
+  needs diagnosis. Neither attempt acknowledged the batch or deleted its leads.
+- A temporary diagnostic is prepared privately to log field names, lengths and
+  formula flags without lead values. Automatic approval review rejected its remote
+  upload pending specific user authorization; no diagnostic code was uploaded.
+- Dashboard refresh also succeeded at 18:14:50 UTC. Render's first restoration was
+  verified live with all flags off. A second delivery-disable restoration was
+  requested after the repeat failure.
+
+## Latest access verification — September 30
+
+The user supplied the Cloudflare token privately. Direct token verification returned
+HTTP 200 with active status, and the configured account's Workers scripts lookup
+returned HTTP 200. This proves read access to the target; deployment remains untested.
+The existing Google OAuth authorization refreshed successfully. Identity, configured
+Apps Script project, Sheet, Drive folder and script content checks all returned 200.
+The editor log shows refreshDashboard completed successfully at 17:41 UTC on
+September 30. The earlier missing-token and Google-consent blockers below are historical.
+Render health and authenticated summary returned 200 after one wake timeout:
+paused=true, every execution flag=false, validated=2, delivered=0.
+Live delivery, ACK/cleanup and Cloudflare orchestration still require execution.
 
 The local implementation and automated regression pass. Live cloud orchestration,
 Google delivery, laptop-off operation and credential replacement remain unverified.
@@ -95,13 +142,23 @@ allowlist; private configuration, credentials and local tooling were excluded.
 
 1. Cloudflare API token is empty in the private configuration. Supply it privately
    in .env, then verify account/resource identity before deployment.
-2. clasp 3.4.1 is installed locally and its target is pinned from .env. The upload
-   list contains exactly the six expected Apps Script files. Google authorization completed as the intended Google account. Identity and
-   the configured Apps Script project returned HTTP 200. The configured Sheet and
-   Drive folder both returned HTTP 404 under that account. Restore access or correct
-   the private destination IDs before upload or delivery. No Google mutation occurred.
+2. clasp 3.4.1 is installed locally and its target is pinned from .env. The six
+   expected Apps Script files matched the remote project. The earlier Sheet/folder
+   access errors were resolved, and nine Script Properties were saved and verified.
+   On September 18, manual refreshDashboard stopped at Google's Authorization
+   required prompt. No successful dashboard or delivery execution was verified.
+   Google script execution consent remains distinct from clasp sign-in.
 3. Apply migrations through 0005 explicitly to the verified isolated Render target
-   before deploying this client. No remote deployment or migration was performed.
+   before deploying this client. The new client and migrations remain local.
+   On September 18, user-authorized Render destination corrections were applied
+   from .env, with EXPORT_BATCH_SIZE=2 and final delivery disabled. The existing
+   remote commit 97e95692 was redeployed and verified live; this did not deploy
+   the local Groq changes. Runtime was paused, all gates off, two finals queued.
+   On September 30, destination settings still matched and final delivery remained
+   disabled; the initial runtime summary request timed out. A bounded follow-up
+   returned HTTP 200 for health and summary, with all gates off and the same two
+   queued finals, zero delivered. A fresh dashboard attempt again showed Google's
+   Authorization required dialog; no script consent was granted.
 4. Prove real Sheet write/readback, Drive copy verification, ACK and PostgreSQL cleanup.
    Exercise a tiny shard boundary and dashboard/backup repeated runs.
 5. Prove bounded Cloudflare Cron → Render wake → backpressure → jobs/tick and a tiny
@@ -116,3 +173,14 @@ allowlist; private configuration, credentials and local tooling were excluded.
 No outbound email, production schedule or seven-day campaign was started. Phase 3 is
 one separately approved small real cycle after Phase 2 passes; Phase 4 is the later
 approximately 200,000-raw-record/seven-day campaign. Lead yield is not guaranteed.
+
+## September 30 continuation checks
+
+- Corrected the reusable Render preflight to require the configured workspace ID
+  and check the display name only when explicitly configured.
+- Ruff passed for that script; Git diff whitespace checks passed.
+- Apps Script offline harness: 14 passed. Worker tests: 18 passed.
+- The 91-test Python/database regression above remains the September 15 result;
+  it was not rerun during this configuration/documentation continuation.
+- Cloudflare token remains absent. Google execution consent remains pending.
+- No source acquisition, delivery ACK, payload deletion, or new schedules occurred.
