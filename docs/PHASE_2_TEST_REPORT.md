@@ -1,4 +1,4 @@
-# Phase 2 controlled test report — updated 2026-10-05
+# Phase 2 controlled test report — updated 2026-10-06
 
 ## Verdict
 
@@ -11,7 +11,51 @@ queue/permission work for processing and acquisition stages disabled by environm
 flags. Cleanup and campaign/deadline advancement remain active. No dependency was added.
 Ten targeted scheduler, backpressure and campaign tests passed; changed Python files
 passed Ruff. Unrelated component suites were not repeated. This is a latency reduction,
-not yet proof that the deployed Worker timeout is resolved.
+not by itself proof that the deployed Worker timeout is resolved.
+
+Published the Phase-2 branch and verified its repository matches the configured Render
+test service. Verified the private database binding before applying additive migrations
+0004/0005 from revision 0003. Render reports exact commit 1d989a4e live. Persistent Groq
+quota state and semantic drain deadlines are therefore deployed; no Groq requests were
+needed for this deployment check. All source/model/processing/delivery flags stayed off.
+One direct bounded tick on the paused empty runtime returned HTTP 202 in 4.125 seconds,
+within the Worker's ten-second request timeout.
+
+### October 6 scheduled confirmation and restored state
+
+Real Cron first respected pause, then returned tick_requested with requests=3 at
+05:34:12 UTC after resuming the empty runtime. This confirms the HTTP-202 response
+through the deployed Cloudflare-to-Render path. The first attempt lost its log
+connection; one final bounded attempt captured success. A local DNS interruption
+then prevented initial cleanup, so cleanup was explicitly retried and verified:
+Render paused, all execution flags off, zero raw/candidate/final queues, two delivered,
+Cron empty, coordinator disabled, public route disabled, and temporary tail removed.
+The ten-minute Worker expiry remained the fallback during that interruption.
+
+The direct smoke tick's cleanup completed in one attempt at 05:25:42 UTC. Subsequent
+scheduled ticks did not create another cleanup job; total completed jobs remained five.
+No Groq, YouTube or Bluesky requests were used for these October 6 checks.
+
+### October 6 isolated Google rollover component proof
+
+Ran a temporary verifier against a separate synthetic test Sheet in the configured
+Drive folder. At 05:37:39 UTC it reported three rows over two VALIDATED shards, exact
+readback, replay without duplicate rows, and a verified Drive JSON checksum. Repeating
+the file write reused the same JSON file; a CSV copy was also written. Production
+delivery helper functions performed these checks, including plain-text preservation.
+The main Sheet property and existing delivery allocation were not changed. The
+temporary verifier was removed after the run; synthetic result files were retained.
+
+Scope: this proves Google-side shard creation/write/readback/Drive/replay with synthetic
+placements. It did not claim or acknowledge a new PostgreSQL batch. Database allocation
+has prior automated coverage; the earlier two-lead live ACK/deletion proof still stands.
+Do not present this component check as a new complete autonomous pipeline run.
+
+Remaining Phase-2 gates: one bounded autonomous synthetic pipeline/delivery run,
+independent Apps Script scheduling and laptop-off proof, provider-credential replacement
+and replacement smoke checks. For usage efficiency, combine autonomous pipeline and
+laptop-off validation in one bounded test window when the user can disconnect the laptop.
+Phase 3 is not authorized by this report. No full regression was repeated on October 6.
 
 ## Current evidence — October 5
 
