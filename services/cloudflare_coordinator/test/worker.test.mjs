@@ -68,6 +68,34 @@ test("HTTPS origin rejects paths, embedded credentials and query destinations", 
   }
 });
 
+test("expiration uses execution time and prevents delayed Cron work", async () => {
+  const fake = fixture([]);
+  fake.wallNow = () => Date.parse("2026-10-05T12:00:00Z");
+  const result = await runCoordinator({ ...env, COORDINATOR_EXPIRES_AT: "2026-10-05T12:00:00Z" }, fake);
+  assert.deepEqual(result, { status: "expired", requests: 0 });
+  assert.equal(fake.calls.length, 0);
+});
+
+test("invalid expiration fails closed", async () => {
+  const fake = fixture([]);
+  assert.deepEqual(await runCoordinator({ ...env, COORDINATOR_EXPIRES_AT: "invalid" }, fake),
+    { status: "misconfigured", code: "invalid_expiration", requests: 0 });
+  assert.equal(fake.calls.length, 0);
+});
+
+test("expiration between health and backpressure prevents additional requests", async () => {
+  let time = Date.parse("2026-10-05T11:59:59Z");
+  const fake = fixture([() => {
+    time = Date.parse("2026-10-05T12:00:00Z");
+    return new Response("{}");
+  }]);
+  fake.wallNow = () => time;
+  const result = await runCoordinator({ ...env, COORDINATOR_EXPIRES_AT: "2026-10-05T12:00:00Z" }, fake);
+  assert.equal(result.status, "upstream_unavailable");
+  assert.equal(result.requests, 1);
+  assert.equal(fake.calls.length, 1);
+});
+
 test("healthy Render receives exactly one bounded tick and separated authentication", async () => {
   const fake = fixture([
     { body: { status: "ok" } }, { body: status() }, { status: 202, body: { secret: env.PROCESSOR_TRIGGER_TOKEN } },

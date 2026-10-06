@@ -38,6 +38,9 @@ function ensureGrid_(tab, rows, columns) {
 
 /** Rich text writes preserve literal text (including =,+,-,@), without formula execution. */
 function writeLiteralRows_(range, rows) {
+  // Rich text alone can still coerce numeric-looking strings in an automatic-format cell.
+  // Preserve exact serialized values (including decimal precision and leading zeroes).
+  range.setNumberFormat('@');
   range.setRichTextValues(rows.map(row => row.map(value => SpreadsheetApp.newRichTextValue().setText(value).build())));
 }
 

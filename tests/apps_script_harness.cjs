@@ -22,7 +22,7 @@ function environment(batch = fixture()) {
   const sheets = new Map(), files = [], requests = [], flags = {};
   let acknowledged = false, claims = 0, acks = 0;
   function tab(name) {
-    const values = [], formulas = [];
+    const values = [], formulas = [], formats = [];
     let maxRows = 1000, maxColumns = 26;
     const object = {name, values, formulas, getName: () => name, getMaxRows: () => maxRows,
       getMaxColumns: () => maxColumns, insertRowsAfter: (_at, n) => {maxRows += n;},
@@ -37,12 +37,20 @@ function environment(batch = fixture()) {
         function write(rows, literal) {
           rows.forEach((cells, r) => cells.forEach((value, c) => {
             values[row + r - 1] ||= []; formulas[row + r - 1] ||= [];
-            const text = String(value);
+            let text = String(value);
+            if (literal && (formats[row + r - 1] || [])[column + c - 1] !== '@' &&
+                /^[+-]?\d+(?:\.\d+)?$/.test(text)) text = String(Number(text));
             values[row + r - 1][column + c - 1] = text;
             formulas[row + r - 1][column + c - 1] = !literal && text.startsWith('=') ? text : '';
           }));
         }
         return {getDisplayValues: () => read(values), getFormulas: () => read(formulas),
+          setNumberFormat: format => {
+            for (let r = 0; r < height; r++) {
+              formats[row + r - 1] ||= [];
+              for (let c = 0; c < width; c++) formats[row + r - 1][column + c - 1] = format;
+            }
+          },
           setValues: rows => write(rows, false), setRichTextValues: rows => write(rows.map(cells => cells.map(value => value.text)), true)};
       }};
     sheets.set(name, object);
@@ -102,6 +110,18 @@ function environment(batch = fixture()) {
 
 let passed = 0;
 function test(name, run) {run(); passed++; console.log('PASS ' + name);}
+
+test('delivery preserves numeric-looking text exactly through Google readback and retry', () => {
+  const e = environment(fixture([
+    {lead_id: 1, tab: 'VALIDATED_001', row: 2, values: ['phase2:1', '0.00', '00123']},
+    {lead_id: 2, tab: 'VALIDATED_001', row: 3, values: ['phase2:2', '10.0', '+0123']}
+  ]));
+  e.context.deliverFinalLeads();
+  assert.equal(e.stats().acknowledged, true);
+  assert.deepEqual(e.sheets.get('VALIDATED_001').values.slice(1), e.batch.items.map(item => item.values));
+  e.context.deliverFinalLeads();
+  assert.equal(e.stats().acks, 1);
+});
 
 test('SHA256 and CSV literal protection', () => {
   const e = environment();

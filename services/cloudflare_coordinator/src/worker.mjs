@@ -86,12 +86,23 @@ function parseBackpressure(value) {
 export async function runCoordinator(env, options = {}) {
   const config = configured(env);
   if (config.status) return { ...config, requests: 0 };
+  // Use actual execution time, not a delayed Cron event's scheduled timestamp.
+  const wallNow = options.wallNow || Date.now;
+  let expiresAt = Infinity;
+  if (env.COORDINATOR_EXPIRES_AT) {
+    expiresAt = Date.parse(env.COORDINATOR_EXPIRES_AT);
+    if (!Number.isFinite(expiresAt)) {
+      return { status: "misconfigured", code: "invalid_expiration", requests: 0 };
+    }
+    if (wallNow() >= expiresAt) return { status: "expired", requests: 0 };
+  }
   const fetcher = options.fetch || globalThis.fetch;
   const timeoutMs = Math.min(options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS);
   const time = options.now ? options.now() : Date.now();
   let requests = 0;
 
   async function request(path, token, { method = "GET", json = false, key } = {}) {
+    if (wallNow() >= expiresAt) throw new Error("coordinator_expired");
     if (requests >= MAX_REQUESTS) throw new Error("request_budget");
     requests += 1;
     const controller = new AbortController();
