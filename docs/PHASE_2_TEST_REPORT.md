@@ -1,8 +1,187 @@
-# Phase 2 controlled test report — updated 2026-10-05
+# Phase 2 controlled test report — updated 2026-10-09
 
 ## Verdict
 
 PHASE_2_STATUS=INCOMPLETE
+
+## October 9 isolated final-gate validation (in progress)
+
+Created a fresh schema inside the configured isolated Phase-2 test database and
+applied explicit migrations through 0005. A separate synthetic Sheet in the configured
+Drive folder is used with two data rows per shard. The original database schema,
+three delivered leads, Sheet allocation and receipts are preserved. No new paid
+service or dependency was introduced. All source adapters and schedulers remain off.
+
+The deployed Groq client accepted one synthetic semantic example with strict output:
+420 input tokens, 183 output tokens and recorded Free-plan cost zero. Provider headers
+persisted request limit 1000 / remaining 999 and minute-token limit 8000 / remaining
+7230, with reset timestamps. The conservative reservation was 3144 tokens. These are
+observed response values, not a promise that account limits never change.
+
+With a one-request local cap, the second synthetic candidate deferred to the next
+UTC day, attempts=0, and the completed job reported classified=2. Exactly one provider
+request was recorded. Synthetic contact-validation fixtures were pre-seeded for this
+semantic-path test; this is not a new contact-validation or real-lead-quality proof.
+
+Cooldown/restart, semantic-deadline and full database-backed Google rollover checks
+are still in progress. A cooldown timestamp is injected in isolated test state; no
+real 429 is forced. One initial request timed out before any durable job or inference;
+read-only inspection confirmed zero usage and a same-key retry succeeded. A transport
+disconnect during cooldown setup was retried once. No secrets or contact values are
+included in this report.
+
+## Bounded synthetic cloud flow PASS — October 8, verified October 9
+
+The user supplied a controlled test contact and authorized delivery plus temporary
+payload deletion after ACK. Exactly three synthetic raw records were seeded while
+paused: a strong request, a duplicate identity and an irrelevant record. Real source
+adapters and Groq/xAI remained disabled. No local worker or manual job tick advanced
+this run. Cloudflare Cron and Google delivery were armed with a shared expiry at
+2026-10-08 13:07:03 UTC (15:07:03 Africa/Johannesburg).
+
+Durable scheduled job history confirms, all in one attempt:
+
+| Stage | Completed UTC | Result |
+|---|---|---|
+| Normalize | October 8 12:45:42 | Three records normalized |
+| Validate | October 8 12:50:39 | One candidate checked |
+| Classify/rank | October 8 12:55:40 | One candidate classified |
+| Delivery ACK | October 8 12:59:47 | One lead acknowledged; verified Drive receipt |
+| Google replay | October 8 13:04:38 | IDLE; no remaining final leads |
+
+Google's independent audit recorded SUCCESS at 12:59:49 UTC and EXPIRED at 13:09:36.
+The compact database receipt is ACKNOWLEDGED with count=1 and its personal payload
+removed. Raw, candidate and validated-lead tables are all empty after the run. Provider
+usage counters did not increase. Metrics confirm one identity duplicate and one
+irrelevant rejection. Existing two delivered leads were preserved; total delivered
+count is now three.
+
+Automatic approval review hit its usage limit during the first observer check on
+October 8, so verification resumed October 9. The cloud flow continued without that
+observer. This is not a second laptop-off claim: laptop shutdown was not requested
+or independently confirmed for this window. No real source acquisition, model
+inference, cross-shard allocation or semantic-expiry path is covered by this test.
+
+On October 9, Google delivery was explicitly stopped and its temporary helper removed.
+Cloudflare Cron was removed, the Worker/public route disabled and Render paused.
+Original execution flags and batch limits were restored at the same deployed commit.
+Final verification confirmed the deployment live, paused=true, every execution flag
+false, zero transient payloads, three delivered leads, no Cron schedules, and both
+coordinator and public route disabled. One initial
+Render status request timed out before successful cleanup resumed.
+
+## Laptop-off orchestration PASS — October 6
+
+User confirmed shutdown from 17:07 to 17:25 Africa/Johannesburg (15:07–15:25 UTC).
+Cloud-triggered Render cleanup was created at 15:15:07 UTC and completed at 15:15:13
+in one attempt. Independent Apps Script delivery checks recorded IDLE at 15:11:07,
+15:16:09 and 15:21:08 UTC, all inside the shutdown interval. This proves unattended
+scheduler/empty-queue operation; it does not prove new lead processing during shutdown.
+
+Stopped Google's delivery trigger and set DELIVERY_ENABLED=false. Removed Cloudflare
+Cron, disabled the coordinator/public route, restored Render final-delivery=false and
+paused=true, and verified every execution flag off with zero queued payloads and two
+previously delivered leads. Initial pause restoration ran before deployment completed;
+it was retried successfully after the disabled configuration went live.
+
+## Application-token rotation verified — October 8
+
+Render's pinned deployment is live. Replacement dashboard and operator tokens were
+accepted; both old tokens returned HTTP 401. Apps Script's credential smoke test
+completed successfully using the properties saved by the user: read=true,
+operator=true, paused=true. The replacement Cloudflare coordinator token returned
+HTTP 200 with status=disabled; the old token returned HTTP 401. Initial route
+activation returned 404; one bounded propagation retry succeeded. The public route
+was disabled again. Cron remains absent and all pipeline execution flags remain off.
+No source collection, model inference, or new lead delivery ran for these checks.
+An initial Render verification timed out; one retry succeeded.
+
+The user deferred further credential rotation on October 8 until a pre-Phase-3 review if needed. The original provider-exposure claim is unverified. Application bearers appeared in browser settings output; do not copy them into reports. No secret values appear here.
+
+### Historical test setup retained for provenance (superseded by PASS above)
+
+User confirmed readiness to shut the laptop down for 15 minutes. Apps Script's
+independent deliveryTick trigger is armed every five minutes, expiring at 15:32:43 UTC.
+Cloudflare Cron is armed every five minutes, with calls expiring at 15:33:06 UTC.
+Only final delivery is enabled; acquisition, processing, model/source and Render-local
+scheduler flags remain off. Queues were verified empty before arming. Render's durable
+pause was released for bounded cleanup ticks. No local runner remains necessary.
+
+Four focused offline checks passed for the new optional Google expiry guard: expired
+work makes no delivery calls and removes only its trigger, invalid expiry fails closed,
+audit timestamps are capped at ten, and unbounded existing behavior stays unchanged.
+DELIVERY_TEST_EVENTS retains compact timestamps/statuses for the return check.
+
+At setup time this was ARMED, not yet passed. The planned return steps were to obtain actual shutdown/restart
+times, inspect Apps Script events and Render cleanup job timestamps within that interval,
+then stop Google delivery, remove Cloudflare Cron, restore Render final-delivery=false
+and paused=true, and verify final state. Credential rotation is prepared but not yet
+performed; do not change credentials during this evidence window.
+
+## October 6 targeted scheduler change
+
+Following the user's request to minimize usage, changed schedule_tick to skip database
+queue/permission work for processing and acquisition stages disabled by environment
+flags. Cleanup and campaign/deadline advancement remain active. No dependency was added.
+Ten targeted scheduler, backpressure and campaign tests passed; changed Python files
+passed Ruff. Unrelated component suites were not repeated. This is a latency reduction,
+not by itself proof that the deployed Worker timeout is resolved.
+
+Published the Phase-2 branch and verified its repository matches the configured Render
+test service. Verified the private database binding before applying additive migrations
+0004/0005 from revision 0003. Render reports exact commit 1d989a4e live. Persistent Groq
+quota state and semantic drain deadlines are therefore deployed; no Groq requests were
+needed for this deployment check. All source/model/processing/delivery flags stayed off.
+One direct bounded tick on the paused empty runtime returned HTTP 202 in 4.125 seconds,
+within the Worker's ten-second request timeout.
+
+### October 6 scheduled confirmation and restored state
+
+Real Cron first respected pause, then returned tick_requested with requests=3 at
+05:34:12 UTC after resuming the empty runtime. This confirms the HTTP-202 response
+through the deployed Cloudflare-to-Render path. The first attempt lost its log
+connection; one final bounded attempt captured success. A local DNS interruption
+then prevented initial cleanup, so cleanup was explicitly retried and verified:
+Render paused, all execution flags off, zero raw/candidate/final queues, two delivered,
+Cron empty, coordinator disabled, public route disabled, and temporary tail removed.
+The ten-minute Worker expiry remained the fallback during that interruption.
+
+The direct smoke tick's cleanup completed in one attempt at 05:25:42 UTC. Subsequent
+scheduled ticks did not create another cleanup job; total completed jobs remained five.
+No Groq, YouTube or Bluesky requests were used for these October 6 checks.
+
+### October 6 isolated Google rollover component proof
+
+Ran a temporary verifier against a separate synthetic test Sheet in the configured
+Drive folder. At 05:37:39 UTC it reported three rows over two VALIDATED shards, exact
+readback, replay without duplicate rows, and a verified Drive JSON checksum. Repeating
+the file write reused the same JSON file; a CSV copy was also written. Production
+delivery helper functions performed these checks, including plain-text preservation.
+The main Sheet property and existing delivery allocation were not changed. The
+temporary verifier was removed after the run; synthetic result files were retained.
+
+Scope: this proves Google-side shard creation/write/readback/Drive/replay with synthetic
+placements. It did not claim or acknowledge a new PostgreSQL batch. Database allocation
+has prior automated coverage; the earlier two-lead live ACK/deletion proof still stands.
+Do not present this component check as a new complete autonomous pipeline run.
+
+## Current remaining gates — October 9
+
+1. Bounded synthetic raw-record-to-Google cloud run now PASSES, as recorded above.
+   The next remaining live scopes are the isolated cross-shard allocation test and
+   bounded deployed Groq/semantic-finalization checks below.
+2. Live cross-shard PostgreSQL allocation and ACK need isolated delivery state. The
+   Google component rollover passed, but did not test a new database batch. Preserve
+   the existing destination allocation and receipts.
+3. Updated Groq rate control and semantic-drain finalization have database-backed local
+   coverage, but bounded deployed-path evidence is still outstanding. Do not force
+   real 429s or rerun unaffected regression suites.
+4. Review actual credential exposure and rotate where needed before Phase 3. The user
+   deferred this on October 8; blanket provider rotation does not block Phase-2 work.
+
+Independent Google scheduling and laptop-off empty-queue operation passed October 6.
+This list supersedes pending-work statements in the historical dated sections below.
+Phase 3 remains stopped. No full regression was repeated on October 8.
 
 ## Current evidence — October 5
 

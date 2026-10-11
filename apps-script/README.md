@@ -17,6 +17,8 @@ using the ignored local configuration; never place secrets in source code or She
 | `PROCESSOR_TRIGGER_TOKEN` | Operator bearer token for claim/ACK and manual controls |
 | `DASHBOARD_API_TOKEN` | Read token for dashboard and operational statistics |
 | `DELIVERY_ENABLED` | Exactly `true` permits `deliveryTick` and delivery-trigger installation |
+| `DELIVERY_EXPIRES_AT` | Optional ISO deadline for bounded tests; expiry disables delivery and removes its trigger |
+| `DELIVERY_TEST_EVENTS` | At most ten timestamp/status entries recorded only while a bounded delivery window is configured |
 | `PROCESSOR_SCHEDULE_ENABLED` | Keep `false` when Cloudflare owns processing orchestration |
 | `DASHBOARD_ENABLED` / `BACKUPS_ENABLED` | Gates for their installed scheduled wrappers |
 

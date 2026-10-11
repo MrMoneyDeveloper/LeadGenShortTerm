@@ -151,6 +151,13 @@ def schedule_tick():
         ("collect", "bluesky"),
         ("collect", "youtube"),
     ]:
+        # Disabled stages cannot enqueue work. Avoid queue reads and repeated permission
+        # checks over the remote database; cleanup and campaign advancement still run.
+        if kind == "collect":
+            if not cfg.acquisition_enabled or not getattr(cfg, source + "_enabled", False):
+                continue
+        elif kind != "cleanup" and not cfg.processing_enabled:
+            continue
         with session() as db:
             if kind == "normalize" and not db.scalar(select(SourceRecord.id).where(SourceRecord.status == "PENDING").limit(1)):
                 continue

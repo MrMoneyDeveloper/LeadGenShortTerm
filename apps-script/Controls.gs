@@ -20,9 +20,28 @@ function processorTick() {
 }
 
 function deliveryTick() {
-  if (config_().props.getProperty('DELIVERY_ENABLED') !== 'true') return;
+  const props = config_().props;
+  if (props.getProperty('DELIVERY_ENABLED') !== 'true') return;
+  const expires = props.getProperty('DELIVERY_EXPIRES_AT');
+  if (expires) {
+    const deadline = Date.parse(expires);
+    if (!Number.isFinite(deadline)) throw new Error('CONFIG_DELIVERY_EXPIRATION');
+    if (Date.now() >= deadline) {
+      props.setProperty('DELIVERY_ENABLED', 'false');
+      ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'deliveryTick')
+        .forEach(t => ScriptApp.deleteTrigger(t));
+      status_('DELIVERY', 'EXPIRED', 'Bounded delivery window ended.');
+      return;
+    }
+  }
   try {
     deliverFinalLeads();
+    if (expires) {
+      const status = JSON.parse(props.getProperty('STATUS_DELIVERY') || '{}');
+      const evidence = JSON.parse(props.getProperty('DELIVERY_TEST_EVENTS') || '[]');
+      evidence.push({at: new Date().toISOString(), status: status.status || 'UNKNOWN'});
+      props.setProperty('DELIVERY_TEST_EVENTS', JSON.stringify(evidence.slice(-10)));
+    }
   } catch (e) {
     status_('DELIVERY', 'FAILED', errorCode_(e));
     throw new Error(errorCode_(e));
