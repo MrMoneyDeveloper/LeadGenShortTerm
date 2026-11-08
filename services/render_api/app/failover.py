@@ -154,6 +154,7 @@ def verify_identity(db, cfg, expected_head=None):
     version = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
     if version != expected_head:
         problems.append("migration_head_mismatch")
+    problems += database_url_problems(cfg.database_url.get_secret_value())
     if cfg.failover_expected_database:
         if db.execute(text("SELECT current_database()")).scalar() != cfg.failover_expected_database:
             problems.append("database_name_mismatch")
@@ -162,6 +163,25 @@ def verify_identity(db, cfg, expected_head=None):
         problems.append("pipeline_uninitialized")
     elif state.campaign_id and state.campaign_id != cfg.campaign_id:
         problems.append("campaign_id_mismatch")
+    return problems
+
+
+def database_url_problems(url):
+    """The device must use the EXTERNAL database URL over TLS. Never returns or logs the URL."""
+    from urllib.parse import parse_qs, urlsplit
+
+    try:
+        parts = urlsplit(url.replace("postgresql+psycopg://", "postgresql://"))
+        host = parts.hostname or ""
+    except ValueError:
+        return ["database_url_invalid"]
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return []  # disposable local test database
+    problems = []
+    if "." not in host:
+        problems.append("database_url_internal_host")  # Render internal hostnames have no domain
+    if parse_qs(parts.query).get("sslmode", [""])[0] not in {"require", "verify-ca", "verify-full"}:
+        problems.append("database_tls_not_required")
     return problems
 
 

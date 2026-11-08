@@ -29,6 +29,10 @@ def configure(cfg, enabled=True, failure=2, recovery=2):
     cfg.failover_stall_seconds = 600
     cfg.failover_max_jobs_per_cycle = 3
     cfg.processing_enabled = True
+    import os
+
+    from pydantic import SecretStr
+    cfg.database_url = SecretStr(os.environ.get("TEST_DATABASE_URL", "postgresql://postgres@127.0.0.1/test"))
     return cfg
 
 
@@ -261,3 +265,44 @@ def test_stale_threshold_uses_configuration(isolated_settings):
     cfg.failover_stall_seconds = int(timedelta(minutes=20).total_seconds())
     assert failover.assess(True, {"cloud_heartbeat_age": 1199, "work_due": True}, cfg).cloud_healthy
     assert not failover.assess(True, {"cloud_heartbeat_age": 1201, "work_due": True}, cfg).cloud_healthy
+
+
+def test_device_requires_external_database_url_with_tls():
+    assert failover.database_url_problems("postgresql://u:p@dpg-abc123-a/db") == [
+        "database_url_internal_host", "database_tls_not_required"]
+    assert failover.database_url_problems("postgresql://u:p@dpg-abc123-a.oregon-postgres.render.com/db") == [
+        "database_tls_not_required"]
+    assert failover.database_url_problems(
+        "postgresql://u:p@dpg-abc123-a.oregon-postgres.render.com/db?sslmode=require") == []
+    assert failover.database_url_problems("postgresql+psycopg://postgres@127.0.0.1:5432/test") == []
+
+
+@pytest.mark.integration
+def test_cloud_connection_loss_mid_job_is_reclaimed_once_by_device(postgres, isolated_settings):
+    import os
+
+    from sqlalchemy import create_engine, text
+
+    from app.models import Job, PipelineState, SourceRecord
+
+    jobs.initialize()
+    cfg = configure(isolated_settings, failure=1)
+    with postgres() as db:
+        db.get(PipelineState, 1).paused = False
+        seed_raw(db, 2)
+        # The cloud claimed the job (RUNNING, attempt 1) and then lost its connection mid-stage.
+        db.add(Job(idempotency_key="fo-crash-1", kind="normalize", batch_size=10, status="RUNNING", attempts=1))
+        stale_cloud(db, 3600)
+    cloud = create_engine(os.environ["TEST_DATABASE_URL"]).connect()
+    assert cloud.scalar(text("SELECT pg_try_advisory_lock(:k)"), {"k": jobs.EXECUTOR_LOCK})
+    cloud.commit()
+    _s, report = failover.cycle(cfg, failover.default_state(), client=down(), session_factory=postgres)
+    assert report["jobs"] == ["busy"]  # while the cloud session lives, the device never runs the job
+    cloud.invalidate()  # real connection loss (DBAPI connection closed) releases the advisory lock
+    _s, report = failover.cycle(cfg, _s, client=down(), session_factory=postgres)
+    assert report["jobs"][0] == "complete"
+    with postgres() as db:
+        job = db.query(Job).filter(Job.idempotency_key == "fo-crash-1").one()
+        assert job.status == "COMPLETE" and job.attempts == 2
+        assert db.query(SourceRecord).count() == 0
+        assert db.query(Job).filter(Job.kind == "normalize", Job.status.in_(["QUEUED", "RUNNING"])).count() == 0
