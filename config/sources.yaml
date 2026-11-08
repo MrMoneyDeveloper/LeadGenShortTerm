@@ -4,7 +4,7 @@ bluesky:
   # firehose: random Jetstream sampling filtered by keywords (legacy; very low yield).
   mode: search
   max_requests_per_batch: 12
-  pages_per_query: 2
+  pages_per_query: 1  # deeper pages need authentication; incremental passes cover new posts
   refresh_hours: 6
   overlap_hours: 1
   request_delay_seconds: 0.2

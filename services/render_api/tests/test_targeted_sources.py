@@ -191,3 +191,20 @@ def test_sample_store_disabled_by_default(postgres, isolated_settings):
     pipeline.normalize_batch(5)
     with session() as db:
         assert db.query(SampleRecord).count() == 0
+
+
+def test_refused_deeper_page_ends_phrase_without_source_failure(search, isolated_settings):
+    _cfg, install = search
+
+    class Refusing(Fake):
+        def __call__(self, request):
+            if request.url.params.get("cursor"):
+                self.calls.append(("refused", {}))
+                return httpx.Response(403, json={})
+            return super().__call__(request)
+
+    install(Refusing({('"car insurance"', ""): {"posts": [post(1, "need car insurance")], "cursor": "c2"},
+                      ('"funeral cover"', ""): {"posts": [post(2, "need funeral cover")]}}))
+    result = bluesky.Bluesky().collect({}, 500)
+    assert [r.source_record_id for r in result.records] == ["did:plc:author1/rkey1", "did:plc:author2/rkey2"]
+    assert result.stop_reason == "discovery_complete"

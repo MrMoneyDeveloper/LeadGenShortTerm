@@ -99,7 +99,8 @@ class BlueskySearch:
             response = client.get(SEARCH_HOST + path, params=params)
         except httpx.HTTPError:
             raise SourceError("bluesky_network", 120) from None
-        if response.status_code == 400 and "cursor" in params:
+        # Unauthenticated AppView refuses deeper pages (403) and stale cursors (400): end this phrase.
+        if response.status_code in (400, 403) and "cursor" in params:
             return None
         if response.status_code == 429:
             try:
