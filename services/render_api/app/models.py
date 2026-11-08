@@ -163,8 +163,9 @@ class Lead(Base):
     candidate_id: Mapped[str | None] = mapped_column(ForeignKey("candidates.id", ondelete="SET NULL"), index=True)
     profile: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     rank_score: Mapped[float] = mapped_column(Float, default=0, server_default="0")
-    email: Mapped[str] = mapped_column(String(320))
-    email_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    # 0008: optional when config/scoring.yaml require_contact is false (lead data without email).
+    email: Mapped[str | None] = mapped_column(String(320))
+    email_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     identity_hash: Mapped[str] = mapped_column(String(64), unique=True)
     source: Mapped[str] = mapped_column(String(32), index=True)
     source_url: Mapped[str] = mapped_column(Text)

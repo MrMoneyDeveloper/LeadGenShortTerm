@@ -7,7 +7,7 @@
  * Responses never include property values, tokens or lead data.
  */
 const OPS_SECRET_SHA256 = '7ff92fb612bf4034f488521d064eeaa4138ac86a9cf9aa18fe1731544e52a41b';
-const OPS_EXPIRES_AT = '2026-11-15T00:00:00Z';
+const OPS_EXPIRES_AT = '2026-12-05T00:00:00Z';
 const OPS_PROPERTIES = ['RENDER_BASE_URL', 'DASHBOARD_API_TOKEN', 'PROCESSOR_TRIGGER_TOKEN', 'GOOGLE_SPREADSHEET_ID',
   'GOOGLE_DRIVE_BACKUP_FOLDER_ID', 'DELIVERY_ENABLED', 'BACKUPS_ENABLED', 'DASHBOARD_ENABLED',
   'PROCESSOR_SCHEDULE_ENABLED', 'DELIVERY_EXPIRES_AT', 'SAMPLES_ENABLED'];
@@ -58,6 +58,41 @@ function writeSamples_() {
   return rows.length;
 }
 
+/** Validate the newest delivered rows. Returns checks and non-personal fields only. */
+function peekLeads_(count) {
+  const book = sheet_();
+  const tabs = book.getSheets().filter(t => VALIDATED_TAB_.test(t.getName()));
+  const totals = tabs.map(t => ({tab: t.getName(), data_rows: Math.max(0, t.getLastRow() - 1)}));
+  const products = ['MOTOR', 'HOME', 'CONTENTS', 'LIFE', 'FUNERAL', 'DISABILITY', 'OTHER', 'UNKNOWN'];
+  const rows = [];
+  tabs.forEach(tab => {
+    const last = tab.getLastRow();
+    if (last < 2) return;
+    const width = tab.getLastColumn();
+    const header = tab.getRange(1, 1, 1, width).getDisplayValues()[0];
+    const start = Math.max(2, last - count + 1);
+    tab.getRange(start, 1, last - start + 1, width).getDisplayValues().forEach(values => {
+      const v = {};
+      header.forEach((name, i) => { v[name] = values[i]; });
+      let host = '';
+      try { host = /^https:\/\/([^/]+)/.exec(v.source_url || '')[1]; } catch (e) { host = ''; }
+      rows.push({tab: tab.getName(), created_at: v.created_at, source: v.source, product_type: v.product_type,
+        score: v.score, rank_score: v.rank_score, validation_status: v.validation_status, salutation: v.salutation,
+        source_host: host,
+        checks: {
+          lead_id: /^[A-Za-z0-9_-]+:\d+$/.test(v.lead_id || ''),
+          source_url_https: /^https:\/\//.test(v.source_url || ''),
+          evidence_present: (v.source_evidence || '').length > 0,
+          product_known: products.indexOf(v.product_type) >= 0,
+          salutation_ok: /^Good day( [^,]+)?,$/.test(v.salutation || ''),
+          email_or_flag: (v.email || '') !== '' || v.validation_status === 'NO_EMAIL',
+        }});
+    });
+  });
+  rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  return {totals: totals, newest: rows.slice(0, count)};
+}
+
 function doPost(e) {
   let request;
   try { request = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (err) {
@@ -102,6 +137,8 @@ function doPost(e) {
         return opsOut_({status: 'ok', backup: JSON.parse(props.getProperty('STATUS_BACKUP') || 'null')});
       case 'samples':
         return opsOut_({status: 'ok', rows: writeSamples_()});
+      case 'peek':
+        return opsOut_({status: 'ok', peek: peekLeads_(Math.min(Number(request.rows) || 5, 20))});
       default:
         return opsOut_({status: 'unknown_action'});
     }

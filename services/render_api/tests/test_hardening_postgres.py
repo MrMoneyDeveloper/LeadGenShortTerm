@@ -255,3 +255,58 @@ def test_export_batches_record_layout(postgres, isolated_settings):
     delivery.claim()
     with postgres() as db:
         assert db.scalar(select(ExportBatch.layout)) == "alphabetical"
+
+
+def test_lead_without_email_is_finalized_and_delivered_by_handle_bucket(postgres, isolated_settings, monkeypatch):
+    destination(isolated_settings)
+    monkeypatch.setattr(pipeline.local, "classify", lambda _text: None)
+    with postgres() as db:
+        row = Candidate(source="bluesky", source_url="https://bsky.app/profile/x/post/1", identity_hash=digest("no-email"),
+                        excerpt="Santam car insurance quote please", product_type="MOTOR", score=100, status="VALIDATE",
+                        contacts=[], profile={"username": "kagiso.bsky.social", "profile_url": "https://bsky.app/profile/x"})
+        db.add(row)
+        db.flush()
+        db.add(Classification(candidate_id=row.id, provider="rules", version="fixture", result={
+            "score": 100, "product_type": "MOTOR", "signals": ["south_africa", "quote"], "rejected": False}))
+    pipeline.validate_batch(5)
+    pipeline.classify_batch(5)
+    with postgres() as db:
+        lead = db.scalar(select(Lead))
+        assert lead.email is None and lead.validation_status == "NO_EMAIL"
+        assert lead.email_source_url == "https://bsky.app/profile/x"
+        assert db.get(Dedupe, "lead:" + digest("no-email"))
+    batch = delivery.claim()
+    item = batch["items"][0]
+    assert item["tab"] == "VALIDATED_K_001" and item["values"][7] == "" and item["values"][15] == "NO_EMAIL"
+    delivery.acknowledge(receipt(batch))
+    # The same identity can never be admitted twice.
+    with postgres() as db:
+        row = Candidate(source="bluesky", source_url="https://bsky.app/profile/x/post/2", identity_hash=digest("no-email"),
+                        excerpt="again", product_type="MOTOR", score=100, status="CLASSIFY", contacts=[], profile={})
+        db.add(row)
+        db.flush()
+        db.add(Classification(candidate_id=row.id, provider="rules", version="fixture", result={
+            "score": 100, "product_type": "MOTOR", "signals": ["south_africa", "quote"], "rejected": False}))
+    pipeline.classify_batch(5)
+    with postgres() as db:
+        assert db.scalar(select(func.count()).select_from(Lead)) == 0
+
+
+def test_without_sa_evidence_no_email_lead_still_needs_semantic_pass(postgres, isolated_settings, monkeypatch):
+    jobs.initialize()
+    monkeypatch.setattr(pipeline.local, "classify", lambda _text: None)
+    monkeypatch.setattr(pipeline.semantic, "classify", lambda *_a: (_ for _ in ()).throw(
+        pipeline.semantic.SemanticUnavailable("groq_daily_request_cap", now() + timedelta(hours=1))))
+    with postgres() as db:
+        row = Candidate(source="bluesky", source_url="https://bsky.app/p", identity_hash=digest("us-person"),
+                        excerpt="need car insurance quote", product_type="MOTOR", score=100, status="VALIDATE",
+                        contacts=[], profile={})
+        db.add(row)
+        db.flush()
+        db.add(Classification(candidate_id=row.id, provider="rules", version="fixture", result={
+            "score": 100, "product_type": "MOTOR", "signals": ["quote"], "rejected": False}))
+    pipeline.validate_batch(5)
+    pipeline.classify_batch(5)
+    with postgres() as db:
+        assert db.scalar(select(func.count()).select_from(Lead)) == 0  # no SA evidence: not a final
+        assert db.scalar(select(Candidate.status)) == "CLASSIFY"  # waits for semantic capacity

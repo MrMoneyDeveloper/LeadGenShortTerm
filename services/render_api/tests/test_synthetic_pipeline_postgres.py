@@ -28,6 +28,7 @@ def add_raw(db, number, identity, text, status="PENDING", age_days=0):
     db.execute(insert(Identity).values(identity_hash=digest("synthetic:" + identity)).on_conflict_do_nothing())
 
 
+@pytest.mark.usefixtures("require_contact")
 def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, monkeypatch):
     isolated_settings.delete_processed_raw = True
     records = [

@@ -64,6 +64,7 @@ def test_rank_routes_are_configurable_ordinal_scores(score, route):
     assert 0 <= result["rank_score"] <= 10
 
 
+@pytest.mark.usefixtures("require_contact")
 def test_rank_hard_gates_and_confident_local_negative():
     result = {"score": 100, "product_type": "MOTOR", "signals": ["south_africa"]}
     assert rank(result, False)["route"] != "DIRECT_FINAL"

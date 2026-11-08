@@ -304,6 +304,21 @@ signals:
     - sassa
     - eish
     - howzit
+    # South-Africa-only insurer brands are explicit SA evidence (ambiguous brands excluded).
+    - outsurance
+    - santam
+    - miway
+    - king price
+    - discovery insure
+    - hollard
+    - sanlam
+    - clientele
+    - avbob
+    - assupol
+    - dotsure
+    - virseker
+    - first for women
+    - naked insurance
   insurer:
     - outsurance
     - discovery insure

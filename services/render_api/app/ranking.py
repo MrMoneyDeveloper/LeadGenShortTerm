@@ -8,6 +8,9 @@ def rank(result, valid_contact, ml=None):
     policy = cfg["ranking"]
     signals = result.get("signals", [])
     product = result.get("product_type") in set(cfg.get("target_products", ["MOTOR", "HOME", "CONTENTS"]))
+    # When the operator does not require an email, the contact gate is satisfied by policy so the
+    # calibrated rank thresholds stay unchanged; intent/product/geography gates still apply.
+    valid_contact = valid_contact or not cfg.get("require_contact", True)
     geography_signal = "south_africa" in signals
     geography_gate = geography_signal or not cfg["require_south_africa"]
     confident_ml = ml and ml["confidence"] >= cfg["local_confidence"]

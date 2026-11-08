@@ -22,6 +22,9 @@ max_age_days: 30
 # Final leads require explicit South African evidence (operator target: SA leads). Absence is not a
 # hard reject: such records cannot finalize directly and wait for semantic review instead.
 require_south_africa: true
+# Operator decision 2026-11-08: lead data is wanted even without a published email. Emails that are
+# found are still syntax/MX-validated; leads without one carry validation_status NO_EMAIL.
+require_contact: false
 negative_signals: [broker, job, advertisement, news, non_target]
 # Personal short-term and long-term products that count as in-scope leads.
 target_products: [MOTOR, HOME, CONTENTS, LIFE, FUNERAL, DISABILITY]

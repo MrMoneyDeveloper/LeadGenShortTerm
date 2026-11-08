@@ -31,6 +31,7 @@ def semantic_pass():
                           score=85, reason="Public consumer intent")
 
 
+@pytest.mark.usefixtures("require_contact")
 def test_contacts_precede_selective_priority_inference_and_public_profile_survives(postgres, monkeypatch):
     with postgres() as db:
         for name, value, has_email in [("direct", 100, True), ("medium", 80, True), ("priority", 90, True),

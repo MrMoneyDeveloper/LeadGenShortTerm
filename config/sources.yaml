@@ -5,7 +5,7 @@ bluesky:
   mode: search
   max_requests_per_batch: 12
   pages_per_query: 1  # deeper pages need authentication; incremental passes cover new posts
-  refresh_hours: 6
+  refresh_hours: 1
   overlap_hours: 1
   request_delay_seconds: 0.2
   fetch_profiles: true

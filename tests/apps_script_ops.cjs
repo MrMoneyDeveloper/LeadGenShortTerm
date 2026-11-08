@@ -44,7 +44,7 @@ check('wrong, short or missing secret is unauthorized', () => {
 });
 
 check('expired endpoint refuses even a valid secret', () => {
-  const {post} = load(Date.parse('2026-11-15T00:00:01Z'));
+  const {post} = load(Date.parse('2026-12-05T00:00:01Z'));
   assert.equal(post({action: 'status', secret: SECRET}).status, 'expired');
 });
 

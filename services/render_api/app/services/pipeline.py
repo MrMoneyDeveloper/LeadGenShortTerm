@@ -8,7 +8,7 @@ from sqlalchemy.orm import object_session
 from app.classifiers import grok, local, semantic
 from app.collectors import ADAPTERS
 from app.collectors.profiles import profile
-from app.config import settings
+from app.config import rules, settings
 from app.database import session
 from app.models import (
     Candidate,
@@ -216,6 +216,11 @@ def _terminal(candidate, status):
         samples.update(db, candidate.id, status.lower(), {"final_status": status})
 
 
+def contact_required():
+    """Operator policy (config/scoring.yaml require_contact). Default: a usable email is required."""
+    return rules("scoring").get("require_contact", True)
+
+
 def _usable_contacts(candidate):
     fresh = []
     for contact in candidate.contacts:
@@ -236,7 +241,7 @@ def _finalize(db, candidate):
             metric(db, candidate.source, "email_duplicates")
             continue
         db.add(Lead(
-            candidate_id=candidate.id, email=contact["email"], email_hash=email_hash,
+            candidate_id=candidate.id, email=contact["email"], email_hash=email_hash, validation_status="DELIVERABLE_DOMAIN",
             identity_hash=candidate.identity_hash, source=candidate.source,
             source_url=candidate.source_url, email_source_url=contact["source_url"],
             excerpt=candidate.excerpt, product_type=candidate.product_type,
@@ -247,6 +252,25 @@ def _finalize(db, candidate):
             identity.email_hash = email_hash
         metric(db, candidate.source, "validated")
         candidate.status, candidate.contacts = "VALIDATED", []
+        samples.update(db, candidate.id, "final", {"final_status": "VALIDATED", "rank_score": candidate.rank_score})
+        return True
+    if not candidate.contacts and not contact_required():
+        # Lead data without an email: provenance is the public post/profile; dedupe is by identity.
+        if not claim_hashes(db, ["lead:" + candidate.identity_hash]):
+            metric(db, candidate.source, "identity_duplicates")
+            _reject(db, candidate)
+            return False
+        profile = candidate.profile or {}
+        db.add(Lead(
+            candidate_id=candidate.id, email=None, email_hash=None, identity_hash=candidate.identity_hash,
+            source=candidate.source, source_url=candidate.source_url,
+            email_source_url=profile.get("profile_url") or "", excerpt=candidate.excerpt,
+            product_type=candidate.product_type, score=candidate.score, rank_score=candidate.rank_score,
+            profile=candidate.profile, validation_status="NO_EMAIL",
+        ))
+        metric(db, candidate.source, "validated")
+        metric(db, candidate.source, "validated_no_email")
+        candidate.status = "VALIDATED"
         samples.update(db, candidate.id, "final", {"final_status": "VALIDATED", "rank_score": candidate.rank_score})
         return True
     _reject(db, candidate)
@@ -267,7 +291,7 @@ def classify_batch(limit):
             )
             if not candidate:
                 break
-            if not _usable_contacts(candidate):
+            if not _usable_contacts(candidate) and (candidate.contacts or contact_required()):
                 # Older/retried candidates cannot bypass deterministic contact validation.
                 candidate.status, candidate.available_at = "VALIDATE", now()
                 count += 1
@@ -281,7 +305,7 @@ def classify_batch(limit):
                 contact for contact in _usable_contacts(candidate)
                 if not db.get(Dedupe, "email:" + digest(contact["email"]))
             ]
-            if not fresh_contacts:
+            if candidate.contacts and not fresh_contacts:
                 # Another candidate can finalize after this one's validation stage.
                 # Recheck the hashes before spending local/remote classifier resources.
                 metric(db, candidate.source, "email_duplicates")
@@ -308,7 +332,7 @@ def classify_batch(limit):
                     .on_conflict_do_nothing()
                 )
                 metric(db, candidate.source, "ml_classified")
-            ranked = rank(result, True, ml)
+            ranked = rank(result, bool(candidate.contacts), ml)
             candidate.rank_score = ranked["rank_score"]
             db.execute(insert(Classification).values(
                 candidate_id=candidate.id, provider="ranking", version=ranked["version"], result=ranked,
@@ -383,15 +407,25 @@ def validate_batch(limit):
             if not candidate:
                 break
             if not candidate.contacts:
-                _terminal(candidate, "NO_CONTACT")
-                metric(db, candidate.source, "no_contact")
+                if contact_required():
+                    _terminal(candidate, "NO_CONTACT")
+                    metric(db, candidate.source, "no_contact")
+                else:
+                    candidate.status, candidate.attempts, candidate.available_at = "CLASSIFY", 0, now()
+                    classification = db.scalar(select(Classification).where(
+                        Classification.candidate_id == candidate.id, Classification.provider == "rules",
+                    ))
+                    if classification:
+                        candidate.rank_score = rank(classification.result, False)["rank_score"]
+                    metric(db, candidate.source, "no_contact_allowed")
                 count += 1
                 continue
-            temporary, accepted_contacts = False, []
+            temporary, accepted_contacts, duplicate = False, [], False
             for contact in candidate.contacts:
                 email_hash = digest(contact["email"])
                 if db.get(Dedupe, "email:" + email_hash):
                     metric(db, candidate.source, "email_duplicates")
+                    duplicate = True
                     continue
                 cached = db.get(EmailValidation, email_hash)
                 if cached and cached.checked_at > now() - timedelta(days=3) and cached.reason != "dns_temporary":
@@ -423,6 +457,15 @@ def validate_batch(limit):
                 if temporary and candidate.attempts < settings().job_max_attempts:
                     candidate.attempts += 1
                     candidate.available_at = now() + timedelta(minutes=2**candidate.attempts)
+                elif duplicate:
+                    # This person's email was already accepted/delivered: never re-admit them as a
+                    # no-email lead.
+                    _reject(db, candidate)
+                elif not contact_required():
+                    # Published emails failed validation: keep the lead data, drop the bad contacts.
+                    candidate.contacts = []
+                    candidate.status, candidate.attempts, candidate.available_at = "CLASSIFY", 0, now()
+                    metric(db, candidate.source, "contact_dropped")
                 else:
                     _terminal(candidate, "CONTACT_REVIEW")
                     metric(db, candidate.source, "contact_review")

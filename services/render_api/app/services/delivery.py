@@ -126,7 +126,9 @@ def claim(limit=None):
             if lead.id > 9_007_199_254_740_991:
                 raise DeliveryError("lead_id_exceeds_google_integer_range")
             if layout == "alphabetical":
-                name = bucket(lead.email)
+                # Leads without an email are bucketed by their public handle/display label.
+                profile = lead.profile or {}
+                name = bucket(lead.email or profile.get("username") or profile.get("display_name") or "")
                 tab, row = placement(layout, buckets.get(name, 0), cfg.sheet_shard_rows, name)
                 buckets[name] = buckets.get(name, 0) + 1
             else:

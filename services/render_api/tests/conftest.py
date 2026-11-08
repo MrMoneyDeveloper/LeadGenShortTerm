@@ -76,7 +76,7 @@ def postgres(isolated_settings, monkeypatch):
     Base.metadata.create_all(eng)
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
-        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0007_alphabetical_delivery')"))
+        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0008_optional_lead_email')"))
 
     @contextmanager
     def local_session():
@@ -111,3 +111,15 @@ def postgres(isolated_settings, monkeypatch):
         with admin.begin() as conn:
             conn.execute(text(f"DROP SCHEMA {schema} CASCADE"))
         admin.dispose()
+
+
+@pytest.fixture
+def require_contact():
+    """Pin the strict policy (a usable email is required) for tests of that mode."""
+    from app.config import rules
+
+    scoring = rules("scoring")
+    previous = scoring.get("require_contact")
+    scoring["require_contact"] = True
+    yield
+    scoring["require_contact"] = previous
