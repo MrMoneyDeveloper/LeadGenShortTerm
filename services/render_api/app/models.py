@@ -69,6 +69,9 @@ class PipelineState(Base):
     export_bucket_positions: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     # Distinct qualified finals with usable email at which acquisition stops (persisted at start).
     campaign_final_target: Mapped[int | None] = mapped_column(Integer)
+    # 0009: an unbound destination may only be claimed after explicit verification (recovery or
+    # confirmed-empty initialization), so a fresh database never starts buckets at row 2 blindly.
+    export_destination_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -227,10 +230,23 @@ class ExportBatch(Base):
     first_position: Mapped[int] = mapped_column(BigInteger)
     shard_rows: Mapped[int] = mapped_column(Integer)
     layout: Mapped[str] = mapped_column(String(16), default="sequential", server_default="sequential")
+    # 0009: email-qualified, non-synthetic rows in this batch; survives ACK payload deletion.
+    qualified_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     drive_file_id: Mapped[str | None] = mapped_column(String(160))
     ack_digest: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ExecutorFence(Base):
+    """Single-row fencing token. Each executor run increments ``epoch``; transactions of a stale
+    executor (whose lock connection died) are rejected once a newer executor has taken over."""
+
+    __tablename__ = "executor_fence"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    epoch: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    role: Mapped[str] = mapped_column(String(16), default="", server_default="")
+    acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SampleRecord(Base):

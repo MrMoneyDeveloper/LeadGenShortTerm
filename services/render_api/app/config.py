@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     sheet_layout: Literal["sequential", "alphabetical"] = "sequential"
     # Distinct qualified finals with usable email; acquisition stops when reached, then drains.
     final_lead_target: int = Field(100_000, ge=1, le=10_000_000)
+    # A fresh/replaced database must not claim into an unbound destination until recovery restored
+    # the Google row positions, or the operator confirmed the Sheet is empty.
+    require_verified_destination: bool = True
 
     # Which executor is recording heartbeats: Render ("cloud") or the operator device ("device").
     executor_role: Literal["cloud", "device"] = "cloud"

@@ -306,3 +306,123 @@ def test_cloud_connection_loss_mid_job_is_reclaimed_once_by_device(postgres, iso
         assert job.status == "COMPLETE" and job.attempts == 2
         assert db.query(SourceRecord).count() == 0
         assert db.query(Job).filter(Job.kind == "normalize", Job.status.in_(["QUEUED", "RUNNING"])).count() == 0
+
+
+@pytest.mark.integration
+def test_live_stale_worker_is_fenced_after_lock_connection_is_terminated(postgres, isolated_settings, monkeypatch):
+    """Both workers active: A loses its lock mid-job and keeps running; B takes over; A can't commit."""
+    import os
+    import threading
+
+    from sqlalchemy import create_engine, text
+
+    from app.models import Candidate, ExecutorFence, Job, Metric, PipelineState
+    from app.services import pipeline
+
+    jobs.initialize()
+    configure(isolated_settings)
+    with postgres() as db:
+        db.get(PipelineState, 1).paused = False
+        seed_raw(db, 2)
+        queue_normalize(db)
+    original = pipeline.normalize_batch
+    a_started, b_done = threading.Event(), threading.Event()
+    outcome = {}
+
+    def normalize(limit):
+        if threading.current_thread().name == "worker-a":
+            a_started.set()
+            assert b_done.wait(60)
+            return original(limit)  # A is still alive and tries to process after takeover
+        return original(limit)
+
+    monkeypatch.setattr(pipeline, "normalize_batch", normalize)
+    a = threading.Thread(target=lambda: outcome.setdefault("a", jobs.run_next()), name="worker-a")
+    a.start()
+    assert a_started.wait(60)
+    admin = create_engine(os.environ["TEST_DATABASE_URL"]).connect()
+    try:
+        # Kill only A's dedicated lock connection; A's thread keeps running.
+        killed = admin.execute(text(
+            "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND objid = :k AND granted"),
+            {"k": jobs.EXECUTOR_LOCK}).scalars().all()
+        admin.commit()
+        assert killed == [True]
+    finally:
+        admin.close()
+    outcome["b"] = jobs.run_next()  # B: acquires the released lock, increments the epoch, reclaims
+    b_done.set()
+    a.join(60)
+    assert outcome["b"]["status"] == "complete"
+    assert outcome["a"] == {"status": "fenced"}
+    with postgres() as db:
+        job = db.query(Job).filter(Job.idempotency_key == "fo-normalize-1").one()
+        assert job.status == "COMPLETE" and job.attempts == 2  # B's result stands; A changed nothing
+        processed = db.query(Metric).filter(Metric.name == "processed").one().value
+        assert processed == 2  # each record processed once, not by both workers
+        assert db.query(Candidate).count() == 0
+        assert db.get(ExecutorFence, 1).epoch == 2
+
+
+@pytest.mark.integration
+def test_stale_epoch_cannot_write_even_without_a_running_thread(postgres, isolated_settings):
+    from app.database import FENCE_EPOCH, StaleExecutor
+    from app.models import ExecutorFence, PipelineState
+
+    jobs.initialize()
+    with postgres() as db:
+        db.get(PipelineState, 1).paused = False
+    first = jobs.take_ownership()
+    second = jobs.take_ownership()
+    assert second == first + 1
+    token = FENCE_EPOCH.set(first)
+    try:
+        with pytest.raises(StaleExecutor):
+            with postgres() as db:
+                db.get(PipelineState, 1).paused = True
+    finally:
+        FENCE_EPOCH.reset(token)
+    with postgres() as db:
+        assert db.get(PipelineState, 1).paused is False  # the stale write never landed
+        assert db.get(ExecutorFence, 1).epoch == second
+
+
+@pytest.mark.integration
+def test_database_failure_during_verification_or_execution_pauses_instead_of_exiting(postgres, isolated_settings,
+                                                                                      monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from app.models import PipelineState
+
+    jobs.initialize()
+    cfg = configure(isolated_settings, failure=1)
+    with postgres() as db:
+        db.get(PipelineState, 1).paused = False
+        stale_cloud(db, 3600)
+    calls = {"n": 0}
+
+    @contextmanager
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 2:  # evidence read succeeds, then the database drops during verification
+            raise OperationalError("SELECT 1", {}, Exception("server closed the connection: secret-host"))
+        with postgres() as db:
+            yield db
+
+    state, report = failover.cycle(cfg, failover.default_state(), client=down(), session_factory=flaky)
+    assert report["action"] == "paused_error" and report["error"] == "OperationalError"
+    assert "secret-host" not in str(report)  # sanitized: class name only
+
+    def broken_process(*_args, **_kwargs):
+        raise OperationalError("UPDATE jobs", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(failover, "process", broken_process)
+    state, report = failover.cycle(cfg, state, client=down(), session_factory=postgres)
+    assert report["action"] == "paused_error" and state["mode"] == "device"
+
+    def exploding(*_args, **_kwargs):
+        raise RuntimeError("probe crashed")
+
+    monkeypatch.setattr(failover, "probe_http", exploding)
+    state2, report = failover.safe_cycle(cfg, state, session_factory=postgres)
+    assert report["action"] == "paused_error" and state2 == state  # loop keeps running, state intact

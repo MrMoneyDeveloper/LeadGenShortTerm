@@ -82,6 +82,8 @@ def inspect(db, database_bytes=None):
         "final_target": goal,
         "accepted_finals": accepted,
         "final_target_reached": target_reached,
+        # Delivered/pending rows that are not email-qualified (includes labelled synthetic tests).
+        "non_qualified_rows": campaign.no_email_prospects(db, state),
         "export_required": counts["exports"] > 0,
         "claimed_batches": claimed_batches,
         "note": "Acquisition/source flags still apply; export ACK remains available while paused or full",

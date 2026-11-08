@@ -7,8 +7,18 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.collectors.base import SourceError
 from app.config import rules, settings
-from app.database import advisory_lock, session
-from app.models import Candidate, Failure, Job, PipelineState, ProviderRateState, SourceCursor, SourceRecord, now
+from app.database import FENCE_EPOCH, StaleExecutor, advisory_lock, session
+from app.models import (
+    Candidate,
+    ExecutorFence,
+    Failure,
+    Job,
+    PipelineState,
+    ProviderRateState,
+    SourceCursor,
+    SourceRecord,
+    now,
+)
 from app.repositories import metric
 from app.services import backpressure, campaign, pipeline
 
@@ -101,62 +111,89 @@ def run_next():
         heartbeat(acquired)
         if not acquired:
             return {"status": "busy"}
-        with session() as db:
-            for abandoned in db.scalars(select(Job).where(Job.status == "RUNNING")):
-                abandoned.status = "QUEUED"
-            db.flush()
-            jobs = db.scalars(
-                select(Job).where(Job.status == "QUEUED", Job.available_at <= now()).order_by(Job.created_at).limit(100)
-            ).all()
-            # Drain/cleanup before new raw input, even when old collect jobs were queued first.
-            priority = {"validate": 0, "classify": 1, "normalize": 2, "cleanup": 3, "collect": 4}
-            jobs.sort(key=lambda j: (priority.get(j.kind, 9), j.created_at))
-            job = next((j for j in jobs if permitted(db, j.kind, j.source)), None)
-            if job is None:
-                return {"status": "idle"}
-            if job.attempts >= settings().job_max_attempts:
-                job.status, job.completed_at = "FAILED", now()
-                db.add(Failure(job_id=job.id, source=job.source, code="attempts_exhausted"))
-                return {"status": "failed", "job_id": job.id}
-            job.status, job.attempts = "RUNNING", job.attempts + 1
-            job_id = job.id
+        epoch = take_ownership()
+        token = FENCE_EPOCH.set(epoch)
         try:
+            return _run_owned()
+        except StaleExecutor:
+            # Another executor took over (our lock connection died). Nothing more is committed.
+            logger.warning("executor_fenced epoch=%s", epoch)
+            return {"status": "fenced"}
+        finally:
+            FENCE_EPOCH.reset(token)
+
+
+def take_ownership():
+    """Increment the fencing epoch. Waits for any in-flight stale transaction to finish first."""
+    with session() as db:
+        stamp = now()
+        return db.execute(
+            insert(ExecutorFence).values(id=1, epoch=1, role=settings().executor_role, acquired_at=stamp)
+            .on_conflict_do_update(index_elements=["id"], set_={
+                "epoch": ExecutorFence.epoch + 1, "role": settings().executor_role, "acquired_at": stamp})
+            .returning(ExecutorFence.epoch)
+        ).scalar()
+
+
+def _run_owned():
+    with session() as db:
+        for abandoned in db.scalars(select(Job).where(Job.status == "RUNNING")):
+            abandoned.status = "QUEUED"
+        db.flush()
+        jobs = db.scalars(
+            select(Job).where(Job.status == "QUEUED", Job.available_at <= now()).order_by(Job.created_at).limit(100)
+        ).all()
+        # Drain/cleanup before new raw input, even when old collect jobs were queued first.
+        priority = {"validate": 0, "classify": 1, "normalize": 2, "cleanup": 3, "collect": 4}
+        jobs.sort(key=lambda j: (priority.get(j.kind, 9), j.created_at))
+        job = next((j for j in jobs if permitted(db, j.kind, j.source)), None)
+        if job is None:
+            return {"status": "idle"}
+        if job.attempts >= settings().job_max_attempts:
+            job.status, job.completed_at = "FAILED", now()
+            db.add(Failure(job_id=job.id, source=job.source, code="attempts_exhausted"))
+            return {"status": "failed", "job_id": job.id}
+        job.status, job.attempts = "RUNNING", job.attempts + 1
+        job_id = job.id
+    try:
+        if job.kind == "collect":
+            result = pipeline.collect(job)
+        else:
+            fn = {
+                "normalize": pipeline.normalize_batch,
+                "classify": pipeline.classify_batch,
+                "validate": pipeline.validate_batch,
+                "cleanup": pipeline.cleanup,
+            }[job.kind]
+            result = fn(job.batch_size)
+        with session() as db:
+            stored = db.get(Job, job_id)
+            stored.status, stored.completed_at, stored.result = "COMPLETE", now(), result
+            campaign.record_progress(db)
+        logger.info("job_complete kind=%s job_id=%s", job.kind, job_id)
+        return {"status": "complete", "job_id": job_id, "result": result}
+    except Exception as exc:
+        if isinstance(exc, StaleExecutor):
+            raise  # never record a failure on behalf of a fenced executor
+        code = exc.code if isinstance(exc, SourceError) else type(exc).__name__
+        delay = exc.retry_seconds if isinstance(exc, SourceError) else min(3600, 30 * 2**job.attempts)
+        with session() as db:
+            stored = db.get(Job, job_id)
+            stored.status = "FAILED" if stored.attempts >= settings().job_max_attempts else "QUEUED"
+            stored.available_at = now() + timedelta(seconds=delay)
+            stored.result = {"error_code": code}
+            if stored.status == "FAILED":
+                stored.completed_at = now()
+            db.add(Failure(job_id=job_id, source=job.source, code=code))
+            metric(db, job.source or "all", "failures")
             if job.kind == "collect":
-                result = pipeline.collect(job)
-            else:
-                fn = {
-                    "normalize": pipeline.normalize_batch,
-                    "classify": pipeline.classify_batch,
-                    "validate": pipeline.validate_batch,
-                    "cleanup": pipeline.cleanup,
-                }[job.kind]
-                result = fn(job.batch_size)
-            with session() as db:
-                stored = db.get(Job, job_id)
-                stored.status, stored.completed_at, stored.result = "COMPLETE", now(), result
-                campaign.record_progress(db)
-            logger.info("job_complete kind=%s job_id=%s", job.kind, job_id)
-            return {"status": "complete", "job_id": job_id, "result": result}
-        except Exception as exc:
-            code = exc.code if isinstance(exc, SourceError) else type(exc).__name__
-            delay = exc.retry_seconds if isinstance(exc, SourceError) else min(3600, 30 * 2**job.attempts)
-            with session() as db:
-                stored = db.get(Job, job_id)
-                stored.status = "FAILED" if stored.attempts >= settings().job_max_attempts else "QUEUED"
-                stored.available_at = now() + timedelta(seconds=delay)
-                stored.result = {"error_code": code}
-                if stored.status == "FAILED":
-                    stored.completed_at = now()
-                db.add(Failure(job_id=job_id, source=job.source, code=code))
-                metric(db, job.source or "all", "failures")
-                if job.kind == "collect":
-                    source = db.get(SourceCursor, job.source)
-                    source.failures += 1
-                    source.retry_at = now() + timedelta(seconds=delay)
-                    if source.failures >= settings().job_max_attempts:
-                        source.enabled = False
-            logger.warning("job_failed job_id=%s code=%s", job_id, code)
-            return {"status": "retry_or_failed", "job_id": job_id, "error_code": code}
+                source = db.get(SourceCursor, job.source)
+                source.failures += 1
+                source.retry_at = now() + timedelta(seconds=delay)
+                if source.failures >= settings().job_max_attempts:
+                    source.enabled = False
+        logger.warning("job_failed job_id=%s code=%s", job_id, code)
+        return {"status": "retry_or_failed", "job_id": job_id, "error_code": code}
 
 
 def schedule_tick():

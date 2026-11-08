@@ -37,6 +37,7 @@ def isolated_settings(monkeypatch):
         google_drive_backup_folder_id="",
         campaign_deadline=None,
         scheduler_enabled=False,
+        require_verified_destination=False,
         local_model_path="",
         xai_api_key="",
         youtube_api_key="",
@@ -76,7 +77,7 @@ def postgres(isolated_settings, monkeypatch):
     Base.metadata.create_all(eng)
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
-        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0008_optional_lead_email')"))
+        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0009_target_fencing_recovery')"))
 
     @contextmanager
     def local_session():
@@ -92,8 +93,11 @@ def postgres(isolated_settings, monkeypatch):
                 yield acquired
             finally:
                 if acquired:
-                    conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
-                    conn.commit()
+                    try:
+                        conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+                        conn.commit()
+                    except Exception:  # noqa: BLE001 - lost connection already released the lock
+                        pass
 
     import sys
 

@@ -21,15 +21,40 @@ def final_target(state):
     return int((state.campaign_final_target if state is not None else None) or settings().final_lead_target)
 
 
+NOT_QUALIFIED = ("NO_EMAIL", "SYNTHETIC_TEST")
+
+
+def qualified_lead_clause():
+    """A lead counts toward the target only with a usable email and a real (non-synthetic) status."""
+    return (Lead.email.is_not(None)) & (Lead.email != "") & (Lead.validation_status.not_in(NOT_QUALIFIED))
+
+
+def is_qualified(lead):
+    return bool(lead.email) and lead.validation_status not in NOT_QUALIFIED
+
+
 def accepted_finals(db, state):
-    """Pending finals plus acknowledged deliveries for this campaign, never double-counted.
+    """Email-qualified finals: pending plus acknowledged for this campaign, never double-counted.
 
     A claimed-but-unacknowledged batch still has its rows in ``validated_leads`` (ACK deletes them
-    and marks the batch), so each accepted lead is counted exactly once. Raw records, no-email
-    prospects and duplicates never reach either set.
+    and marks the batch), so each lead is counted once. Each batch stores ``qualified_count`` at
+    claim time, so the count survives payload deletion. NO_EMAIL prospects and synthetic rows never
+    count; raw records and duplicates never reach either set.
     """
-    pending = db.scalar(select(func.count()).select_from(Lead)) or 0
-    delivered = select(func.coalesce(func.sum(ExportBatch.count), 0)).where(ExportBatch.status == "ACKNOWLEDGED")
+    pending = db.scalar(select(func.count()).select_from(Lead).where(qualified_lead_clause())) or 0
+    delivered = select(func.coalesce(func.sum(ExportBatch.qualified_count), 0)).where(ExportBatch.status == "ACKNOWLEDGED")
+    if state is not None and state.campaign_id:
+        delivered = delivered.where(ExportBatch.campaign_id == state.campaign_id)
+        if state.campaign_started_at is not None:
+            delivered = delivered.where(ExportBatch.created_at >= state.campaign_started_at)
+    return int(pending) + int(db.scalar(delivered) or 0)
+
+
+def no_email_prospects(db, state):
+    """Reported separately from the target: pending NO_EMAIL leads plus delivered non-qualified rows."""
+    pending = db.scalar(select(func.count()).select_from(Lead).where(Lead.validation_status == "NO_EMAIL")) or 0
+    delivered = select(func.coalesce(func.sum(ExportBatch.count - ExportBatch.qualified_count), 0)).where(
+        ExportBatch.status == "ACKNOWLEDGED")
     if state is not None and state.campaign_id:
         delivered = delivered.where(ExportBatch.campaign_id == state.campaign_id)
         if state.campaign_started_at is not None:

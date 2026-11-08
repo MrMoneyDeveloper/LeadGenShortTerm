@@ -1,14 +1,34 @@
 from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Session
 
 from app.config import settings
 
+# Executor fencing: the epoch this execution context owns (None outside run_next).
+FENCE_EPOCH: ContextVar[int | None] = ContextVar("fence_epoch", default=None)
+
+
+class StaleExecutor(Exception):
+    """A newer executor took over; this (stale) execution must not commit anything."""
+
 
 class Base(DeclarativeBase):
     pass
+
+
+@event.listens_for(Session, "after_begin")
+def _check_fence(_session, _transaction, connection):
+    epoch = FENCE_EPOCH.get()
+    if epoch is None:
+        return
+    # FOR SHARE: a takeover's epoch increment waits for this transaction; after takeover, the
+    # stale executor's next transaction sees a different epoch and is rejected before any write.
+    current = connection.execute(text("SELECT epoch FROM executor_fence WHERE id = 1 FOR SHARE")).scalar()
+    if current != epoch:
+        raise StaleExecutor("executor_fenced")
 
 
 @lru_cache
@@ -43,5 +63,8 @@ def advisory_lock(key):
             yield acquired
         finally:
             if acquired:
-                conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
-                conn.commit()
+                try:
+                    conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+                    conn.commit()
+                except Exception:  # noqa: BLE001 - lost connection already released the lock
+                    pass

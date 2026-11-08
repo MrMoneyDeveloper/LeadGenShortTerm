@@ -122,18 +122,43 @@ cleared on start.
 | PostgreSQL expires or is replaced | Everything pauses (no competing database). Before acquisition resumes on a fresh database, migrate it and restore dedupe hashes from the delivered Google data (below) |
 | Google stays unavailable | Finals stay in PostgreSQL; nothing is deleted without ACK; once queued work reaches the high-water mark, acquisition stops until delivery recovers |
 
-## Restoring dedupe on a fresh database
+## Recovering a fresh or replaced database
 
-Export every `VALIDATED_*` tab (or use the Drive delivery/backup CSVs), then:
+Before any delivery or acquisition on a new database, recover from the finished Google dataset.
+Inputs: the verified Drive delivery files (`lead-delivery-*.json`, downloaded into one folder) and a
+JSON file of each `VALIDATED_*` tab's data-row count from the `SHARD_INDEX` tab
+(e.g. `{"VALIDATED_A_001": 812, "VALIDATED_001": 6}`).
 
 ```powershell
 cd services\render_api
-..\..\.venv\Scripts\python -m app.cli restore-dedupe --csv C:\path\VALIDATED_A_001.csv C:\path\VALIDATED_001.csv
-..\..\.venv\Scripts\python -m app.cli restore-dedupe --apply --csv C:\path\VALIDATED_A_001.csv C:\path\VALIDATED_001.csv
+..\..\.venv\Scripts\python -m alembic -c alembic.ini upgrade head
+..\..\.venv\Scripts\python -m app.cli recover --deliveries C:\path\deliveries --tab-rows C:\path\tab_rows.json
+..\..\.venv\Scripts\python -m app.cli recover --deliveries C:\path\deliveries --tab-rows C:\path\tab_rows.json --apply
 ```
 
-The first command is a dry run showing rows and key counts. `--apply` inserts the missing
-`email:`, `record:` and Bluesky `lead:` hashes, computed exactly as the pipeline computes them, and
-reports `verified: true` when every expected key is present. Labelled `SYNTHETIC_TEST` rows are
-skipped. YouTube identities aren't in the delivered URL, so YouTube people are protected through
-their comment and email hashes only.
+The dry run validates every file's checksum and requires every row `2..n+1` of every tab to be
+covered exactly once. Empty, partial, tampered or conflicting inputs are refused. The delivery JSON
+is lossless (no CSV formula escaping), so a value like `+alice@...` hashes exactly as delivered.
+`--apply` (fresh database only) bulk-inserts the `email:`, `record:` and Bluesky `lead:` hashes in
+1,000-key chunks, restores the per-letter and legacy row cursors so the next claim continues after
+the last occupied Google row, binds and verifies the destination, then re-reads everything and fails
+unless it all matches. Until recovery (or `confirm-empty-destination` for a brand-new empty Sheet),
+a fresh database refuses delivery claims (`destination_unverified`). Labelled `SYNTHETIC_TEST` rows
+keep their positions but create no hashes. YouTube identities aren't in the delivered URL, so YouTube
+people are protected by comment and email hashes only.
+
+## Tested guarantees
+
+Database guarantees (covered by tests against PostgreSQL):
+
+- One executor at a time through the advisory lock; a second executor gets `busy`.
+- Fencing: every executor run increments `executor_fence.epoch`. All database transactions of that
+  run verify the epoch under a shared lock. After a takeover, a still-running stale executor cannot
+  commit anything, including job status (tested with both workers live and the old lock connection
+  terminated server-side). Takeover waits for an in-flight stale transaction to finish.
+- An abandoned job is reclaimed and completed by the new owner; its records are processed once.
+- Database errors anywhere in a watchdog cycle pause that cycle and retry; the watchdog keeps running.
+
+Not guaranteed: exactly-once external API execution. A stale worker's HTTP request already in
+flight (Groq, Bluesky, YouTube, Netlify) can still complete after takeover; its result is discarded
+by fencing, but the provider call (and any quota it used) has happened.

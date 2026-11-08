@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import session
 from app.models import Candidate, Dedupe, ExportBatch, Lead, PipelineState, SourceRecord, now
 from app.repositories import metric
+from app.services import campaign
 
 FIELDS = [
     "lead_id", "campaign_id", "display_name", "first_name", "salutation", "username", "business_name", "email", "source",
@@ -107,6 +108,10 @@ def claim(limit=None):
             or state.export_shard_rows != cfg.sheet_shard_rows
         ):
             raise DeliveryError("final_destination_changed")
+        if (not state.export_spreadsheet_id and not state.export_destination_verified
+                and cfg.require_verified_destination):
+            # Fresh/replaced database: rows may already exist in Google. Recover or confirm first.
+            raise DeliveryError("destination_unverified")
         if bound_layout(state) and bound_layout(state) != cfg.sheet_layout:
             # Never silently switch an occupied destination between layouts.
             raise DeliveryError("final_layout_changed")
@@ -149,7 +154,7 @@ def claim(limit=None):
         batch = ExportBatch(
             campaign_id=campaign_id, spreadsheet_id=cfg.google_spreadsheet_id,
             drive_folder_id=cfg.google_drive_backup_folder_id, checksum=checksum(items), fields=FIELDS,
-            items=items, count=len(items),
+            items=items, count=len(items), qualified_count=sum(1 for lead in rows if campaign.is_qualified(lead)),
             # Alphabetical placements live in the items and the durable bucket cursors.
             first_position=state.export_next_position if layout == "sequential" else 0,
             shard_rows=cfg.sheet_shard_rows, layout=layout,
@@ -183,7 +188,23 @@ def adopt_destination(next_position):
                 or db.scalar(select(ExportBatch.id).limit(1))):
             raise DeliveryError("destination_already_in_use")
         state.export_next_position = next_position
+        state.export_destination_verified = True
         return {"export_next_position": next_position}
+
+
+def confirm_empty_destination(confirm_spreadsheet_id):
+    """Operator confirms the configured Sheet has no VALIDATED_* rows (first use of a new Sheet)."""
+    cfg = settings()
+    with session() as db:
+        state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
+        if not state:
+            raise DeliveryError("pipeline_uninitialized")
+        if state.export_spreadsheet_id or db.scalar(select(ExportBatch.id).limit(1)):
+            raise DeliveryError("destination_already_in_use")
+        if not cfg.google_spreadsheet_id or not secrets.compare_digest(str(confirm_spreadsheet_id), cfg.google_spreadsheet_id):
+            raise DeliveryError("destination_not_confirmed")
+        state.export_destination_verified = True
+        return {"export_destination_verified": True}
 
 
 def adopt_layout(layout, confirm_spreadsheet_id):

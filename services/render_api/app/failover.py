@@ -229,15 +229,26 @@ def cycle(cfg, state, client=None, session_factory=None, expected_head=None, sto
         if not cfg.failover_enabled:
             report["action"] = "observe_only_failover_disabled"
         else:
-            with session_factory() as db:
-                problems = verify_identity(db, cfg, expected_head)
-            if problems:
-                report["action"], report["identity_problems"] = "refused_identity", problems
-            else:
-                report["jobs"] = process(cfg, stop_requested)
-                state["device_jobs_run"] += sum(1 for status in report["jobs"] if status not in {"idle", "busy"})
-                report["action"] = "device_processed"
+            try:
+                with session_factory() as db:
+                    problems = verify_identity(db, cfg, expected_head)
+                if problems:
+                    report["action"], report["identity_problems"] = "refused_identity", problems
+                else:
+                    report["jobs"] = process(cfg, stop_requested)
+                    state["device_jobs_run"] += sum(1 for s in report["jobs"] if s not in {"idle", "busy", "fenced"})
+                    report["action"] = "device_processed"
+            except Exception as exc:  # noqa: BLE001 - pause and retry next cycle; never exit
+                report["action"], report["error"] = "paused_error", type(exc).__name__  # class name only
     return state, report
+
+
+def safe_cycle(cfg, state, **kwargs):
+    """Recovery boundary for the loop: any unexpected failure becomes a paused cycle."""
+    try:
+        return cycle(cfg, state, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        return state, {"mode": state.get("mode"), "action": "paused_error", "error": type(exc).__name__, "jobs": []}
 
 
 @contextmanager
@@ -272,8 +283,11 @@ def run(cfg, max_cycles=None, sleep=time.sleep):
         state = load_state()
         cycles = 0
         while not STOP_FILE.exists():
-            state, report = cycle(cfg, state, stop_requested=STOP_FILE.exists)
-            save_state(state)
+            state, report = safe_cycle(cfg, state, stop_requested=STOP_FILE.exists)
+            try:
+                save_state(state)
+            except OSError:
+                report["state_saved"] = False
             print(json.dumps(report, default=str), flush=True)
             cycles += 1
             if max_cycles is not None and cycles >= max_cycles:
@@ -314,7 +328,7 @@ def main(argv=None):
         return 0
     if args.command == "once":
         with single_instance():
-            state, report = cycle(cfg, load_state())
+            state, report = safe_cycle(cfg, load_state())
             save_state(state)
             print(json.dumps(report, indent=1, default=str))
         return 0
