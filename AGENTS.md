@@ -192,7 +192,10 @@ Strong consumer quote/switch/recommendation intent should outrank generic discus
 
 Broker advertising, recruitment, news, and non-target insurance categories should rank low or reject as configured.
 
-South African context is a positive signal, not an automatic reason to fabricate location.
+South African evidence is required for a final lead (`require_south_africa: true`, operator decision
+2026-11-08). Its absence routes a record to semantic review rather than rejecting it, and location is
+never fabricated. Toward the 100,000 final-lead target only distinct, qualified finals with a usable
+public email count; raw records, no-email prospects, synthetic fixtures and duplicates never do.
 
 ## Secrets
 

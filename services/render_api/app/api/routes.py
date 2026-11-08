@@ -25,6 +25,7 @@ class CampaignStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     raw_target: int | None = Field(None, ge=1, le=10_000_000)
     duration_days: int | None = Field(None, ge=1, le=30)
+    final_target: int | None = Field(None, ge=1, le=10_000_000)
 
 
 @router.get("/health")
@@ -70,7 +71,7 @@ def campaign_status():
 @router.post("/admin/campaign/start", dependencies=[Depends(operator)])
 def start_campaign(body: CampaignStartRequest):
     try:
-        return campaign.start(body.raw_target, body.duration_days)
+        return campaign.start(body.raw_target, body.duration_days, body.final_target)
     except campaign.CampaignError as exc:
         raise HTTPException(409, str(exc)) from None
 
@@ -83,7 +84,7 @@ class ClaimRequest(BaseModel):
 class Placement(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     lead_id: int = Field(ge=1, le=9_007_199_254_740_991)
-    tab: str = Field(pattern=r"^VALIDATED_[0-9]{3,}$", max_length=40)
+    tab: str = Field(pattern=r"^VALIDATED_(?:(?:[A-Z]|OTHER)_)?[0-9]{3,}$", max_length=40)
     row: int = Field(ge=2)
 
 
@@ -288,3 +289,10 @@ def sample_delete(body: SampleDeleteRequest):
         raise HTTPException(422, "source, source_record_id or confirm_all required")
     with session() as db:
         return {"deleted": samples.remove(db, body.source, body.source_record_id)}
+
+
+@router.get("/dashboard/shards", dependencies=[Depends(dashboard)])
+def shards(existing_cells: int = Query(0, ge=0, le=50_000_000)):
+    """Delivery tabs per bucket with capacity; Apps Script supplies its actual allocated cell count."""
+    with session() as db:
+        return delivery.shard_status(db, existing_cells)

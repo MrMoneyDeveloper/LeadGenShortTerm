@@ -27,6 +27,8 @@ function environment(batch = fixture()) {
     const object = {name, values, formulas, getName: () => name, getMaxRows: () => maxRows,
       getMaxColumns: () => maxColumns, insertRowsAfter: (_at, n) => {maxRows += n;},
       insertColumnsAfter: (_at, n) => {maxColumns += n;}, setFrozenRows: () => {},
+      deleteRows: (at, n) => {assert.ok(at + n - 1 <= maxRows); maxRows -= n;},
+      deleteColumns: (at, n) => {assert.ok(at + n - 1 <= maxColumns); maxColumns -= n;},
       clearContents: () => {values.length = 0; formulas.length = 0;},
       getLastRow: () => {let i = values.length; while (i && !(values[i - 1] || []).some(v => v !== '')) i--; return i;},
       getLastColumn: () => values.reduce((max, row) => Math.max(max, row.length), 0),
@@ -241,5 +243,81 @@ test('backup repairs history after manifest write and bounds CSV pages', () => {
   assert.equal(e.files.filter(file => file.name.startsWith('validated-leads-') && file.name.endsWith('.csv')).length, 2);
   assert.equal(e.sheets.get('EXPORT_HISTORY').values[1][1], 'SUCCESS');
   assert.equal(e.sheets.get('EXPORT_HISTORY').getLastRow(), 2);
+});
+function alphabetical() {
+  return fixture([
+    {lead_id: 11, tab: 'VALIDATED_A_001', row: 2, values: ['phase2:11', 'alice@example.test', 'A']},
+    {lead_id: 12, tab: 'VALIDATED_A_001', row: 3, values: ['phase2:12', 'amy@example.test', 'A2']},
+    {lead_id: 13, tab: 'VALIDATED_Z_001', row: 2, values: ['phase2:13', 'zed@example.test', 'Z']},
+    {lead_id: 14, tab: 'VALIDATED_OTHER_001', row: 2, values: ['phase2:14', '9lives@example.test', 'O']},
+  ]);
+}
+test('alphabetical delivery writes per-letter and OTHER tabs at exact grid size', () => {
+  const e = environment(alphabetical());
+  e.context.deliverFinalLeads();
+  assert.equal(e.stats().acks, 1);
+  assert.deepEqual(e.sheets.get('VALIDATED_A_001').values.slice(1).map(row => row[0]), ['phase2:11', 'phase2:12']);
+  assert.equal(e.sheets.get('VALIDATED_Z_001').values[1][0], 'phase2:13');
+  assert.equal(e.sheets.get('VALIDATED_OTHER_001').values[1][0], 'phase2:14');
+  const a = e.sheets.get('VALIDATED_A_001');
+  assert.equal(a.getMaxRows(), 3, 'header + 2 rows, no empty 1000-row grid');
+  assert.equal(a.getMaxColumns(), 3, 'one column per field, no empty 26-column grid');
+  assert.equal(e.sheets.get('VALIDATED_001'), undefined, 'legacy sequential tabs are not touched');
+});
+test('alphabetical rollover continues in the next shard of the same letter', () => {
+  const batch = fixture([
+    {lead_id: 21, tab: 'VALIDATED_B_001', row: 4, values: ['phase2:21', 'bob@example.test', 'B']},
+    {lead_id: 22, tab: 'VALIDATED_B_002', row: 2, values: ['phase2:22', 'bea@example.test', 'B']},
+  ]);
+  batch.shard_rows = 3;
+  const e = environment(batch); e.context.deliverFinalLeads();
+  assert.equal(e.sheets.get('VALIDATED_B_001').values[3][0], 'phase2:21');
+  assert.equal(e.sheets.get('VALIDATED_B_002').values[1][0], 'phase2:22');
+});
+test('invalid bucket tab names are rejected before any write', () => {
+  for (const tab of ['VALIDATED_a_001', 'VALIDATED_AB_001', 'VALIDATED_OTHERS_001', 'VALIDATED_A_1', 'LEADS_A_001']) {
+    const e = environment(fixture([{lead_id: 1, tab, row: 2, values: ['phase2:1', 'x@example.test', 'X']}]));
+    assert.throws(() => e.context.deliverFinalLeads(), /DELIVERY_PLACEMENT_INVALID/, tab);
+    assert.equal(e.stats().acks, 0);
+  }
+});
+test('workbook capacity is checked before creating tabs, writing or ACKing', () => {
+  const e = environment(alphabetical());
+  e.props.set('WORKBOOK_CELL_LIMIT', '100000');
+  const filler = e.tab('EXISTING_DATA');
+  filler.insertRowsAfter(1000, 2500);  // 3,500 x 26 = 91,000 allocated cells (> 90% of 100,000)
+  assert.throws(() => e.context.deliverFinalLeads(), /DELIVERY_WORKBOOK_CAPACITY/);
+  assert.equal(e.sheets.get('VALIDATED_A_001'), undefined);
+  assert.equal(e.stats().acks, 0);
+  e.props.set('WORKBOOK_CELL_LIMIT', '10000000');
+  e.context.deliverFinalLeads();  // the same claimed batch delivers once capacity exists
+  assert.equal(e.stats().acks, 1);
+});
+test('shard index lists every validated tab, bucket, rows, capacity and allocated cells', () => {
+  const e = environment(alphabetical());
+  e.context.deliverFinalLeads();
+  const index = e.sheets.get('SHARD_INDEX').values;
+  assert.deepEqual(index[0], ['tab', 'bucket', 'data_rows', 'capacity', 'remaining', 'allocated_cells']);
+  const rows = Object.fromEntries(index.slice(1).map(row => [row[0], row]));
+  assert.deepEqual(rows.VALIDATED_A_001.slice(1, 6), ['A', '2', '5000', '4998', '9']);
+  assert.equal(rows.VALIDATED_OTHER_001[1], 'OTHER');
+  assert.equal(rows.WORKBOOK_TOTAL[2], '4');
+});
+test('alphabetical lost ACK replays the same batch without duplicate rows', () => {
+  const e = environment(alphabetical());
+  e.flags.loseAckResponse = true;
+  assert.throws(() => e.context.deliverFinalLeads());
+  e.context.deliverFinalLeads();
+  assert.equal(e.stats().claims, 1);
+  assert.equal(e.sheets.get('VALIDATED_A_001').getLastRow(), 3);
+  assert.equal(e.files.filter(file => file.name.endsWith('.json')).length, 1);
+});
+test('daily backup includes alphabetical and legacy shards in a stable order', () => {
+  const e = environment(alphabetical());
+  e.context.deliverFinalLeads();
+  const legacy = e.tab('VALIDATED_001');
+  legacy.getRange(1, 1, 2, 3).setValues([['lead_id', 'email', 'display_name'], ['phase2:1', 'legacy@example.test', 'L']]);
+  assert.deepEqual(e.context.backupSnapshot_().map(item => item.tab),
+    ['VALIDATED_001', 'VALIDATED_A_001', 'VALIDATED_OTHER_001', 'VALIDATED_Z_001']);
 });
 console.log('apps-script tests: ' + passed + ' passed (offline mocks only)');

@@ -1,4 +1,57 @@
 /** Final output is append-only. Render owns placement and a durable immutable batch. */
+// Sequential VALIDATED_001 or alphabetical VALIDATED_A_001 ... VALIDATED_Z_001 / VALIDATED_OTHER_001.
+const VALIDATED_TAB_ = /^VALIDATED_(?:([A-Z]|OTHER)_)?\d{3,}$/;
+// Keep a margin below the configured workbook cell limit (blank cells count toward it).
+const WORKBOOK_USABLE_FRACTION_ = 0.9;
+
+function workbookCellLimit_() {
+  const raw = config_().props.getProperty('WORKBOOK_CELL_LIMIT');
+  const limit = raw ? Number(raw) : 10000000;
+  if (!Number.isSafeInteger(limit) || limit < 100000) throw new Error('CONFIG_WORKBOOK_CELL_LIMIT');
+  return limit;
+}
+
+function allocatedCells_(book) {
+  return book.getSheets().reduce((sum, tab) => sum + tab.getMaxRows() * tab.getMaxColumns(), 0);
+}
+
+/** Cells a write would add: exact-size new tabs and row/column growth of existing ones. */
+function plannedGrowth_(book, groups, columns) {
+  const planned = {};
+  let growth = 0;
+  groups.forEach(group => {
+    const tab = book.getSheetByName(group.tab);
+    const current = planned[group.tab] || (tab ? {rows: tab.getMaxRows(), cols: tab.getMaxColumns()} : {rows: 0, cols: 0});
+    const rows = Math.max(current.rows, group.row + group.items.length - 1);
+    const cols = Math.max(current.cols, columns);
+    growth += rows * cols - current.rows * current.cols;
+    planned[group.tab] = {rows: rows, cols: cols};
+  });
+  return growth;
+}
+
+/** New delivery tabs are trimmed to exactly header + needed rows and one column per field. */
+function newTrimmedTab_(book, name, rows, columns) {
+  const tab = book.insertSheet(name);
+  if (tab.getMaxRows() > rows) tab.deleteRows(rows + 1, tab.getMaxRows() - rows);
+  if (tab.getMaxColumns() > columns) tab.deleteColumns(columns + 1, tab.getMaxColumns() - columns);
+  return tab;
+}
+
+function refreshShardIndex_(shardRows) {
+  const book = sheet_();
+  const rows = book.getSheets().filter(tab => VALIDATED_TAB_.test(tab.getName())).map(tab => {
+    const match = VALIDATED_TAB_.exec(tab.getName());
+    const data = Math.max(0, tab.getLastRow() - 1);
+    return {tab: tab.getName(), bucket: match[1] || 'SEQUENTIAL', data_rows: data, capacity: shardRows,
+      remaining: Math.max(0, shardRows - data), allocated_cells: tab.getMaxRows() * tab.getMaxColumns()};
+  }).sort((a, b) => a.tab.localeCompare(b.tab));
+  rows.push({tab: 'WORKBOOK_TOTAL', bucket: '', data_rows: rows.reduce((total, row) => total + row.data_rows, 0),
+    capacity: Math.floor(workbookCellLimit_() * WORKBOOK_USABLE_FRACTION_), remaining: '',
+    allocated_cells: allocatedCells_(book)});
+  writeRows_('SHARD_INDEX', rows, ['tab', 'bucket', 'data_rows', 'capacity', 'remaining', 'allocated_cells']);
+}
+
 function validateDelivery_(batch) {
   const cfg = config_();
   if (!batch || batch.spreadsheet_id !== cfg.sheet || batch.drive_folder_id !== cfg.folder) {
@@ -15,7 +68,7 @@ function validateDelivery_(batch) {
   batch.items.forEach(item => {
     const place = item.tab + ':' + item.row;
     if (!Number.isSafeInteger(item.lead_id) || item.lead_id < 1 ||
-        !/^VALIDATED_\d{3,}$/.test(item.tab) || !Number.isInteger(item.row) || item.row < 2 || item.row > batch.shard_rows + 1 ||
+        !VALIDATED_TAB_.test(item.tab) || !Number.isInteger(item.row) || item.row < 2 || item.row > batch.shard_rows + 1 ||
         !Array.isArray(item.values) || item.values.length !== batch.fields.length ||
         item.values.some(v => typeof v !== 'string') ||
         item.values[0] !== String(batch.campaign_id) + ':' + item.lead_id || ids[item.lead_id] || places[place]) {
@@ -56,11 +109,18 @@ function deliveryGroups_(batch) {
 
 function verifyDeliverySheets_(batch, allowWrite) {
   const book = sheet_(), groups = deliveryGroups_(batch), plans = [], headers = {};
+  if (allowWrite) {
+    // Check actual allocated workbook cells before creating or growing any tab.
+    const projected = allocatedCells_(book) + plannedGrowth_(book, groups, batch.fields.length);
+    if (projected > Math.floor(workbookCellLimit_() * WORKBOOK_USABLE_FRACTION_)) {
+      throw new Error('DELIVERY_WORKBOOK_CAPACITY');
+    }
+  }
   groups.forEach(group => {
     let tab = book.getSheetByName(group.tab);
     if (!tab) {
       if (!allowWrite) throw new Error('DELIVERY_SHEET_MISSING');
-      tab = book.insertSheet(group.tab);
+      tab = newTrimmedTab_(book, group.tab, group.row + group.items.length - 1, batch.fields.length);
     }
     ensureGrid_(tab, group.row + group.items.length - 1, batch.fields.length);
     const header = tab.getRange(1, 1, 1, batch.fields.length).getDisplayValues()[0];
@@ -114,6 +174,7 @@ function acknowledgeDelivery_(batch, file) {
   deliveryIndex_(batch, 'ACKNOWLEDGED', file.getUrl());
   config_().props.deleteProperty('DELIVERY_STATE');
   status_('DELIVERY', 'SUCCESS', 'batch=' + batch.batch_id + '; rows=' + batch.items.length);
+  try { refreshShardIndex_(batch.shard_rows); } catch (e) { console.log('SHARD_INDEX_FAILED ' + errorCode_(e)); }
 }
 
 /** One batch only, <=200 final leads. No collection, classification or scheduling here. */

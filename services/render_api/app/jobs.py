@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app.collectors.base import SourceError
 from app.config import rules, settings
 from app.database import advisory_lock, session
-from app.models import Candidate, Failure, Job, PipelineState, SourceCursor, SourceRecord, now
+from app.models import Candidate, Failure, Job, PipelineState, ProviderRateState, SourceCursor, SourceRecord, now
 from app.repositories import metric
 from app.services import backpressure, campaign, pipeline
 
@@ -73,10 +73,32 @@ def enqueue(kind, source, key, batch_size=None):
         return stored
 
 
+EXECUTOR_LOCK = 7112001
+
+
+def heartbeat(acquired):
+    """Record that this executor role (cloud or device) was ticked. No host or payload data."""
+    role = settings().executor_role
+    try:
+        with session() as db:
+            key = "executor_" + role
+            db.execute(insert(ProviderRateState).values(provider=key, state={}).on_conflict_do_nothing())
+            row = db.scalar(select(ProviderRateState).where(ProviderRateState.provider == key).with_for_update())
+            state = dict(row.state or {})
+            stamp = now().timestamp()
+            state.update(last_tick_at=stamp, ticks=state.get("ticks", 0) + 1)
+            if acquired:
+                state["last_lock_at"] = stamp
+            row.state = state
+    except Exception:  # heartbeat is evidence only; never block execution on it
+        logger.warning("executor_heartbeat_failed role=%s", role)
+
+
 def run_next():
-    # One bounded executor across all web processes. A killed worker loses the advisory lock;
-    # the next executor reclaims RUNNING jobs immediately without stale lease races.
-    with advisory_lock(7112001) as acquired:
+    # One bounded executor across all web processes AND the optional device failover watchdog.
+    # A killed worker loses the advisory lock; the next executor reclaims RUNNING jobs immediately.
+    with advisory_lock(EXECUTOR_LOCK) as acquired:
+        heartbeat(acquired)
         if not acquired:
             return {"status": "busy"}
         with session() as db:

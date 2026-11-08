@@ -224,6 +224,33 @@ succeed before the corresponding heavy PostgreSQL lead/candidate payload is dele
 `installReportingTriggers()` manages dashboard and backup triggers separately. No trigger is installed
 merely by uploading the Apps Script project.
 
+### Alphabetical layout and final-lead target
+
+| Variable | Default / use |
+|---|---|
+| `SHEET_LAYOUT` | `sequential`; `alphabetical` places finals in `VALIDATED_<A-Z|OTHER>_###` by normalized email. Pinned per destination; switch only with `adopt-layout` |
+| `FINAL_LEAD_TARGET` | `100000`; distinct qualified finals with a usable email at which acquisition stops (persisted per campaign at start) |
+
+Apps Script property `WORKBOOK_CELL_LIMIT` (default `10000000`, a conservative value valid for any
+account type; Google announced 20 million cells for Sheets in September 2026) caps delivery: a
+write that would take allocated workbook cells above 90% of the limit fails with
+`DELIVERY_WORKBOOK_CAPACITY` before any tab is created, grown or acknowledged. New delivery tabs are
+created at exactly header + needed rows and one column per field. `SHARD_INDEX` lists every
+validated tab with its bucket, rows, capacity and allocated cells after each acknowledged delivery.
+
+`config/scoring.yaml` `require_south_africa: true` (operator target: South African leads) means a
+final needs explicit South African evidence: deterministic finals need the `south_africa` signal and
+semantic passes need `south_africa_signal`. Records without it are not hard-rejected; they wait for
+semantic review and never count toward the target while uncertain.
+
+### Local-device failover
+
+See [LOCAL_FAILOVER.md](LOCAL_FAILOVER.md). Settings: `EXECUTOR_ROLE` (`cloud`; the launcher sets
+`device`), `RENDER_BASE_URL`, `FAILOVER_ENABLED` (`false`: observe-only), `FAILOVER_INTERVAL_SECONDS`
+(60), `FAILOVER_FAILURE_THRESHOLD` (3), `FAILOVER_RECOVERY_THRESHOLD` (3), `FAILOVER_STALL_SECONDS`
+(1200), `FAILOVER_HEALTH_TIMEOUT_SECONDS` (15), `FAILOVER_MAX_JOBS_PER_CYCLE` (5) and optional
+`FAILOVER_EXPECTED_DATABASE` (PostgreSQL `current_database()` name that must match).
+
 ## Optional Cloudflare coordinator
 
 Cloudflare performs orchestration only. It does not store/process lead payloads. Deployment metadata

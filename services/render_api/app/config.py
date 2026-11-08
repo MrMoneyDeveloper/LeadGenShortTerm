@@ -45,6 +45,24 @@ class Settings(BaseSettings):
     google_drive_backup_folder_id: str = ""
     export_batch_size: int = Field(100, ge=1, le=200)
     sheet_shard_rows: int = Field(5000, ge=1, le=5000)
+    # sequential: VALIDATED_001...; alphabetical: VALIDATED_<A-Z|OTHER>_001 by normalized email.
+    # Pinned at a destination's first allocation; switching needs the guarded adopt-layout command.
+    sheet_layout: Literal["sequential", "alphabetical"] = "sequential"
+    # Distinct qualified finals with usable email; acquisition stops when reached, then drains.
+    final_lead_target: int = Field(100_000, ge=1, le=10_000_000)
+
+    # Which executor is recording heartbeats: Render ("cloud") or the operator device ("device").
+    executor_role: Literal["cloud", "device"] = "cloud"
+    render_base_url: str = ""
+    # Local-device failover watchdog (explicit start only; processing additionally needs FAILOVER_ENABLED).
+    failover_enabled: bool = False
+    failover_interval_seconds: int = Field(60, ge=15, le=3600)
+    failover_failure_threshold: int = Field(3, ge=1, le=20)
+    failover_recovery_threshold: int = Field(3, ge=1, le=20)
+    failover_stall_seconds: int = Field(1200, ge=120, le=86400)
+    failover_health_timeout_seconds: int = Field(15, ge=2, le=90)
+    failover_max_jobs_per_cycle: int = Field(5, ge=1, le=50)
+    failover_expected_database: str = ""
 
     # Default semantic provider: GroqCloud free tier. xAI/Grok remains an explicit legacy option.
     semantic_provider: Literal["groq", "xai"] = "groq"

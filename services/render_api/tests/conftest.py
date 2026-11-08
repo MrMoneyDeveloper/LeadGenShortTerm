@@ -76,7 +76,7 @@ def postgres(isolated_settings, monkeypatch):
     Base.metadata.create_all(eng)
     with eng.begin() as conn:
         conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
-        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0006_sample_store')"))
+        conn.execute(text("INSERT INTO alembic_version (version_num) VALUES ('0007_alphabetical_delivery')"))
 
     @contextmanager
     def local_session():

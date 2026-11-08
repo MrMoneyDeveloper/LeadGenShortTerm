@@ -20,7 +20,10 @@ def inspect(db, database_bytes=None):
     claimed_batches = db.scalar(
         select(func.count()).select_from(ExportBatch).where(ExportBatch.status == "CLAIMED")
     )
-    state = campaign.observe(db, total, claimed_batches) if state is not None else None
+    accepted = campaign.accepted_finals(db, state)
+    goal = campaign.final_target(state)
+    target_reached = accepted >= goal
+    state = campaign.observe(db, total, claimed_batches, accepted) if state is not None else None
 
     database_bytes = (
         database_bytes
@@ -30,6 +33,9 @@ def inspect(db, database_bytes=None):
     queue_draining = total >= cfg.queue_high_water or bool(
         state and state.draining and total > cfg.queue_low_water
     )
+    # Reaching the accepted-lead target stops acquisition (existing "drain" mode, which every
+    # scheduler already understands) while processing, delivery and cleanup continue.
+    queue_draining = queue_draining or target_reached
     pressure = database_bytes >= cfg.database_high_water_bytes or bool(
         state and state.storage_pressure and database_bytes > cfg.database_low_water_bytes
     )
@@ -72,7 +78,10 @@ def inspect(db, database_bytes=None):
         "queue_low_water": cfg.queue_low_water,
         "database_high_water_bytes": cfg.database_high_water_bytes,
         "collect_allowance": collect_allowance,
-        "campaign": campaign.payload(state) if state else None,
+        "campaign": campaign.payload(state, accepted) if state else None,
+        "final_target": goal,
+        "accepted_finals": accepted,
+        "final_target_reached": target_reached,
         "export_required": counts["exports"] > 0,
         "claimed_batches": claimed_batches,
         "note": "Acquisition/source flags still apply; export ACK remains available while paused or full",

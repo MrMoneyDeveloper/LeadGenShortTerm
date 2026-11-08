@@ -42,11 +42,32 @@ def test_non_target_seller_job_and_news_are_hard_negatives():
         assert score(text, "bluesky", now())["rejected"]
 
 
-def test_missing_geography_is_not_an_automatic_hard_reject():
+def test_missing_geography_is_not_a_hard_reject_but_cannot_finalize_directly():
     result = score("Need car insurance and a quote. Can anyone recommend an insurer?", "youtube", now())
     assert "south_africa" not in result["signals"]
     assert not result["rejected"]
     ranked = rank(result, True)
-    assert ranked["hard_gates"]["geography"]
+    assert not ranked["hard_gates"]["geography"]
     assert not ranked["hard_gates"]["geography_signal"]
-    assert ranked["route"] != "REJECT"
+    assert ranked["route"] not in {"REJECT", "DIRECT_FINAL"}
+
+
+def test_south_african_evidence_requirement_is_configurable(monkeypatch):
+    import app.ranking as ranking
+    from app.config import rules
+
+    record = {"score": 100, "product_type": "MOTOR", "signals": []}
+    assert not ranking.rank(record, True)["hard_gates"]["geography"]  # repository policy: required
+    relaxed = {**rules("scoring"), "require_south_africa": False}
+    monkeypatch.setattr(ranking, "rules", lambda name: relaxed)
+    assert ranking.rank(record, True)["hard_gates"]["geography"]
+
+
+def test_semantic_pass_requires_south_african_signal():
+    from app.classifiers.grok import SemanticResult
+    from app.ranking import semantic_qualified
+
+    base = dict(is_insurance_relevant=True, intent_level="HIGH", product_type="MOTOR", is_consumer=True,
+                is_advertisement=False, is_broker_or_agent=False, score=95, reason="fixture")
+    assert semantic_qualified(SemanticResult(**base, south_africa_signal=True))
+    assert not semantic_qualified(SemanticResult(**base, south_africa_signal=False))

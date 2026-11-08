@@ -5,6 +5,10 @@
 Phase 3 still requires explicit approval. No production schedule, seven-day campaign or outbound
 email is authorized by merging code.
 
+Related runbooks: [local-device failover](LOCAL_FAILOVER.md), [source-yield gate](SOURCE_YIELD_GATE.md)
+and the [data-collection hardening report](DATA_COLLECTION_HARDENING_REPORT.md) (alphabetical
+delivery, final-lead target, capacity).
+
 ## Scheduling and campaign state
 
 Cloudflare is the primary lightweight scheduler when explicitly enabled. One invocation wakes

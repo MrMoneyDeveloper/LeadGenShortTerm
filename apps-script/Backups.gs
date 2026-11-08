@@ -37,8 +37,16 @@ function saveState_(state) {
 }
 
 function backupSnapshot_() {
-  return sheet_().getSheets().filter(tab => /^VALIDATED_\d{3,}$/.test(tab.getName()))
-    .sort((a, b) => Number(a.getName().slice(10)) - Number(b.getName().slice(10)))
+  // Sequential (VALIDATED_001) and alphabetical (VALIDATED_A_001 / VALIDATED_OTHER_001) shards.
+  const key = name => {
+    const match = /^VALIDATED_(?:([A-Z]|OTHER)_)?(\d{3,})$/.exec(name);
+    return match ? {bucket: match[1] || '', shard: Number(match[2])} : null;
+  };
+  return sheet_().getSheets().filter(tab => key(tab.getName()) !== null)
+    .sort((a, b) => {
+      const left = key(a.getName()), right = key(b.getName());
+      return left.bucket.localeCompare(right.bucket) || left.shard - right.shard;
+    })
     .map(tab => ({tab: tab.getName(), through: tab.getLastRow(), columns: tab.getLastColumn()}))
     .filter(item => item.through >= 1 && item.columns >= 1);
 }

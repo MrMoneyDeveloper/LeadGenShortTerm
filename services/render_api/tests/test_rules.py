@@ -20,14 +20,20 @@ def test_intent_and_negative_rules():
     assert score("Need a quote for car insurance", "youtube", now() - timedelta(days=40))["rejected"]
 
 
+def result_text():
+    return "Need a quote for car insurance, premium increased, changing insurer, insurance recommendations"
+
+
 def test_geography_not_inferred_from_platform():
     result = score(
         "Need a quote for car insurance, premium increased, changing insurer, insurance recommendations",
         "youtube",
         now(),
     )
-    assert result["confident"]
     assert "south_africa" not in result["signals"]
+    # Strong intent alone is not deterministic confidence without explicit SA evidence.
+    assert not result["confident"] and not result["rejected"]
+    assert score("Joburg: " + result_text(), "youtube", now())["confident"]
 
 
 def test_formula_injection_export():

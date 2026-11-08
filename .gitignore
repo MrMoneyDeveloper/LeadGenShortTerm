@@ -17,3 +17,4 @@ ml/training/*.csv
 !ml/training/example.csv
 ml/evaluation/*.json
 .vs/
+.failover/

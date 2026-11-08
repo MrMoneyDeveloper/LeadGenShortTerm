@@ -68,6 +68,8 @@ def test_rank_hard_gates_and_confident_local_negative():
     result = {"score": 100, "product_type": "MOTOR", "signals": ["south_africa"]}
     assert rank(result, False)["route"] != "DIRECT_FINAL"
     no_geo = rank({**result, "signals": []}, True)
-    assert no_geo["hard_gates"]["geography"] and not no_geo["hard_gates"]["geography_signal"]
+    # SA evidence is required to finalize; without it the record waits for semantic review.
+    assert not no_geo["hard_gates"]["geography"] and not no_geo["hard_gates"]["geography_signal"]
+    assert no_geo["route"] == "SEMANTIC"
     assert rank({**result, "product_type": "UNKNOWN"}, True)["route"] != "DIRECT_FINAL"
     assert rank(result, True, {"label": "ADVERTISEMENT", "confidence": 0.99})["route"] == "REJECT"

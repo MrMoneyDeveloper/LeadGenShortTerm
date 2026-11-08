@@ -15,7 +15,10 @@ Interactive API docs and public OpenAPI are disabled. Responses use `Cache-Contr
 | GET | `/dashboard/campaign` | Persisted campaign lifecycle/counters/deadline |
 | GET | `/dashboard/failures` | Last sanitized failure records |
 | GET | `/dashboard/candidates` | Bounded review sample |
-| POST | `/admin/campaign/start` | Persist actual start time, target and calculated duration/deadline; resume pipeline |
+| GET | `/dashboard/shards` | Delivery layout, tabs per bucket (`A`..`Z`, `OTHER`, or `SEQUENTIAL`), rows, remaining capacity and an exact-size workbook cell estimate (`existing_cells` query adds the workbook's current allocation) |
+| GET | `/dashboard/samples` / `/exports/samples.csv` | Bounded sample store (read token) |
+| POST | `/admin/samples/delete` | Explicit sample deletion by source record, source or `confirm_all` |
+| POST | `/admin/campaign/start` | Persist actual start time, raw target, final-lead target (`final_target`, default `FINAL_LEAD_TARGET`) and calculated duration/deadline; resume pipeline |
 | POST | `/jobs/collect` | Queue bounded source acquisition |
 | POST | `/jobs/process` | Queue `normalize`, `classify`, or `validate` |
 | POST | `/jobs/cleanup` | Queue bounded retention pass |
@@ -114,3 +117,23 @@ Google. CSV cells with formula prefixes are apostrophe escaped.
 
 `DELIVERABLE_DOMAIN` means email syntax/domain/MX checks passed. It does not prove mailbox existence or
 permission to send marketing email.
+
+## Alphabetical delivery and final-lead target (migration 0007)
+
+With `SHEET_LAYOUT=alphabetical`, claims place each final by the first character of its
+normalized email: `VALIDATED_A_001` ... `VALIDATED_Z_001`, digits and every other character in
+`VALIDATED_OTHER_001`. Each bucket has a durable cursor in `pipeline_state.export_bucket_positions`
+and rolls over after `SHEET_SHARD_ROWS` data rows (`VALIDATED_A_002`, ...). Claims carry
+`layout`; ACK placements accept `VALIDATED_###` and `VALIDATED_<A-Z|OTHER>_###`.
+
+The layout is pinned at a destination's first claim. A bound destination whose layout differs from
+`SHEET_LAYOUT` fails closed with `final_layout_changed`. Switching requires the explicit
+`python -m app.cli adopt-layout --layout alphabetical --confirm-spreadsheet-id <bound id>`, which
+refuses while a claimed batch is outstanding and never resets any cursor. Legacy sequential tabs,
+rows and receipts are untouched; alphabetical names cannot collide with them.
+
+`/dashboard/backpressure` and `/dashboard/campaign` report `final_target`, `accepted_finals`,
+`finals_remaining` and `final_target_reached`. Accepted finals are pending `validated_leads` plus
+acknowledged deliveries of the current campaign (a claimed batch is counted once). Reaching the
+target puts acquisition into the existing `drain` mode and moves a running campaign to `DRAINING`;
+processing, delivery and cleanup continue.

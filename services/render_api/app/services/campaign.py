@@ -16,10 +16,36 @@ class CampaignError(ValueError):
     pass
 
 
-def payload(state):
+def final_target(state):
+    """Distinct qualified finals with usable email at which acquisition stops."""
+    return int((state.campaign_final_target if state is not None else None) or settings().final_lead_target)
+
+
+def accepted_finals(db, state):
+    """Pending finals plus acknowledged deliveries for this campaign, never double-counted.
+
+    A claimed-but-unacknowledged batch still has its rows in ``validated_leads`` (ACK deletes them
+    and marks the batch), so each accepted lead is counted exactly once. Raw records, no-email
+    prospects and duplicates never reach either set.
+    """
+    pending = db.scalar(select(func.count()).select_from(Lead)) or 0
+    delivered = select(func.coalesce(func.sum(ExportBatch.count), 0)).where(ExportBatch.status == "ACKNOWLEDGED")
+    if state is not None and state.campaign_id:
+        delivered = delivered.where(ExportBatch.campaign_id == state.campaign_id)
+        if state.campaign_started_at is not None:
+            delivered = delivered.where(ExportBatch.created_at >= state.campaign_started_at)
+    return int(pending) + int(db.scalar(delivered) or 0)
+
+
+def payload(state, accepted=None):
     target = int(state.campaign_raw_target or 0)
     scanned = int(state.campaign_raw_scanned or 0)
+    goal = final_target(state)
     return {
+        "final_target": goal,
+        "accepted_finals": accepted,
+        "finals_remaining": None if accepted is None else max(0, goal - accepted),
+        "final_target_reached": None if accepted is None else accepted >= goal,
         "campaign_id": state.campaign_id,
         "status": state.campaign_status,
         "started_at": state.campaign_started_at,
@@ -34,10 +60,13 @@ def payload(state):
     }
 
 
-def start(raw_target=None, duration_days=None):
+def start(raw_target=None, duration_days=None, final_target=None):
     cfg = settings()
     raw_target = raw_target or cfg.campaign_raw_target
     duration_days = duration_days or cfg.campaign_duration_days
+    final_target = final_target or cfg.final_lead_target
+    if final_target < 1 or final_target > 10_000_000:
+        raise CampaignError("campaign_final_target_invalid")
     if raw_target < 1 or raw_target > 10_000_000:
         raise CampaignError("campaign_raw_target_invalid")
     if duration_days < 1 or duration_days > 30:
@@ -67,6 +96,7 @@ def start(raw_target=None, duration_days=None):
         state.campaign_started_at = started
         state.campaign_deadline = started + timedelta(days=duration_days)
         state.campaign_raw_target = raw_target
+        state.campaign_final_target = final_target
         state.campaign_raw_scanned = 0
         state.campaign_last_progress_at = started
         state.campaign_completed_at = None
@@ -75,7 +105,7 @@ def start(raw_target=None, duration_days=None):
         state.draining = False
         state.storage_pressure = False
         state.updated_at = started
-        return payload(state)
+        return payload(state, 0)
 
 
 def record_scan(db, scanned):
@@ -98,16 +128,19 @@ def record_progress(db):
         state.campaign_last_progress_at = now()
 
 
-def observe(db, total_work_rows, claimed_batches):
+def observe(db, total_work_rows, claimed_batches, accepted=None):
     """Advance deadline/target/drain completion without creating any new work."""
     state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
     if state is None:
         return None
     current = now()
+    if accepted is None:
+        accepted = accepted_finals(db, state)
 
     if state.campaign_status == "RUNNING" and (
         (state.campaign_deadline is not None and current >= state.campaign_deadline)
         or (state.campaign_raw_target and state.campaign_raw_scanned >= state.campaign_raw_target)
+        or accepted >= final_target(state)
     ):
         state.campaign_status = "DRAINING"
         state.draining = True
@@ -140,4 +173,4 @@ def status():
         state = db.get(PipelineState, 1)
         if state is None:
             raise CampaignError("pipeline_uninitialized")
-        return payload(state)
+        return payload(state, accepted_finals(db, state))

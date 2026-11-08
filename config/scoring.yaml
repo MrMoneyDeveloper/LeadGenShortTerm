@@ -19,8 +19,9 @@ discard_below: 25
 accept_without_llm_above: 85
 local_confidence: 0.85
 max_age_days: 30
-# South African evidence boosts the score, but absence alone must not hard-reject otherwise strong intent.
-require_south_africa: false
+# Final leads require explicit South African evidence (operator target: SA leads). Absence is not a
+# hard reject: such records cannot finalize directly and wait for semantic review instead.
+require_south_africa: true
 negative_signals: [broker, job, advertisement, news, non_target]
 # Personal short-term and long-term products that count as in-scope leads.
 target_products: [MOTOR, HOME, CONTENTS, LIFE, FUNERAL, DISABILITY]

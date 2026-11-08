@@ -23,6 +23,45 @@ class DeliveryError(ValueError):
     pass
 
 
+BUCKETS = [chr(code) for code in range(ord("A"), ord("Z") + 1)] + ["OTHER"]
+# Conservative default for any Google account type; Workspace files may allow more.
+WORKBOOK_CELL_LIMIT = 10_000_000
+
+
+def bucket(email):
+    """Alphabetical bucket from the normalized email's first character; digits/other -> OTHER."""
+    first = (email or "").strip().casefold()[:1]
+    return first.upper() if "a" <= first <= "z" else "OTHER"
+
+
+def placement(layout, position, shard_rows, bucket_name=None):
+    shard, row = position // shard_rows + 1, position % shard_rows + 2
+    if layout == "alphabetical":
+        return f"VALIDATED_{bucket_name}_{shard:03d}", row
+    return f"VALIDATED_{shard:03d}", row
+
+
+def capacity_plan(rows_per_group, shard_rows, fields=None, existing_cells=0, limit=WORKBOOK_CELL_LIMIT):
+    """Cells needed when tabs are sized exactly (header + data rows, one column per field).
+
+    ``rows_per_group`` maps a bucket (or "SEQUENTIAL") to its total allocated data rows.
+    """
+    fields = fields or len(FIELDS)
+    tabs, cells = 0, 0
+    for rows in rows_per_group.values():
+        full, rest = divmod(int(rows), shard_rows)
+        group_tabs = full + (1 if rest else 0)
+        tabs += group_tabs
+        cells += (int(rows) + group_tabs) * fields  # data rows plus one header row per tab
+    total = cells + existing_cells
+    return {"tabs": tabs, "delivery_cells": cells, "existing_cells": existing_cells, "total_cells": total,
+            "cell_limit": limit, "within_limit": total <= limit, "headroom_cells": max(0, limit - total)}
+
+
+def bound_layout(state):
+    return state.export_layout or ("sequential" if state.export_spreadsheet_id else None)
+
+
 def checksum(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
@@ -37,7 +76,7 @@ def envelope(batch):
         "batch_id": batch.id, "campaign_id": batch.campaign_id, "status": batch.status,
         "spreadsheet_id": batch.spreadsheet_id, "drive_folder_id": batch.drive_folder_id,
         "checksum": batch.checksum, "fields": batch.fields, "items": canonical_items(batch.items),
-        "shard_rows": batch.shard_rows,
+        "shard_rows": batch.shard_rows, "layout": batch.layout,
     }
 
 
@@ -68,6 +107,9 @@ def claim(limit=None):
             or state.export_shard_rows != cfg.sheet_shard_rows
         ):
             raise DeliveryError("final_destination_changed")
+        if bound_layout(state) and bound_layout(state) != cfg.sheet_layout:
+            # Never silently switch an occupied destination between layouts.
+            raise DeliveryError("final_layout_changed")
         batch = db.scalar(select(ExportBatch).where(ExportBatch.status == "CLAIMED").order_by(ExportBatch.created_at).limit(1))
         if batch:
             return envelope(batch)
@@ -78,10 +120,17 @@ def claim(limit=None):
         # The persisted campaign ID survives Render restarts and cannot drift if an env value changes mid-run.
         campaign_id = state.campaign_id or cfg.campaign_id
         items = []
+        layout = cfg.sheet_layout
+        buckets = dict(state.export_bucket_positions or {})
         for offset, lead in enumerate(rows):
             if lead.id > 9_007_199_254_740_991:
                 raise DeliveryError("lead_id_exceeds_google_integer_range")
-            position = state.export_next_position + offset
+            if layout == "alphabetical":
+                name = bucket(lead.email)
+                tab, row = placement(layout, buckets.get(name, 0), cfg.sheet_shard_rows, name)
+                buckets[name] = buckets.get(name, 0) + 1
+            else:
+                tab, row = placement(layout, state.export_next_position + offset, cfg.sheet_shard_rows)
             profile = lead.profile or {}
             values = {
                 **{key: getattr(lead, key) for key in ("email", "source", "source_url", "email_source_url", "product_type", "score", "validation_status")},
@@ -92,18 +141,23 @@ def claim(limit=None):
                 "rank_score": format(lead.rank_score, ".2f"), "created_at": lead.created_at.isoformat(),
             }
             items.append({
-                "lead_id": lead.id, "tab": f"VALIDATED_{position // cfg.sheet_shard_rows + 1:03d}",
-                "row": position % cfg.sheet_shard_rows + 2,
+                "lead_id": lead.id, "tab": tab, "row": row,
                 "values": [str(values[field] or "") for field in FIELDS],
             })
         batch = ExportBatch(
             campaign_id=campaign_id, spreadsheet_id=cfg.google_spreadsheet_id,
             drive_folder_id=cfg.google_drive_backup_folder_id, checksum=checksum(items), fields=FIELDS,
-            items=items, count=len(items), first_position=state.export_next_position,
-            shard_rows=cfg.sheet_shard_rows,
+            items=items, count=len(items),
+            # Alphabetical placements live in the items and the durable bucket cursors.
+            first_position=state.export_next_position if layout == "sequential" else 0,
+            shard_rows=cfg.sheet_shard_rows, layout=layout,
         )
         db.add(batch)
-        state.export_next_position += len(items)
+        if layout == "alphabetical":
+            state.export_bucket_positions = buckets  # new dict object so the JSONB change persists
+        else:
+            state.export_next_position += len(items)
+        state.export_layout = layout
         state.export_spreadsheet_id = cfg.google_spreadsheet_id
         state.export_folder_id = cfg.google_drive_backup_folder_id
         state.export_shard_rows = cfg.sheet_shard_rows
@@ -123,10 +177,56 @@ def adopt_destination(next_position):
         state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
         if not state:
             raise DeliveryError("pipeline_uninitialized")
-        if state.export_spreadsheet_id or state.export_next_position or db.scalar(select(ExportBatch.id).limit(1)):
+        if (state.export_spreadsheet_id or state.export_next_position or state.export_bucket_positions
+                or db.scalar(select(ExportBatch.id).limit(1))):
             raise DeliveryError("destination_already_in_use")
         state.export_next_position = next_position
         return {"export_next_position": next_position}
+
+
+def adopt_layout(layout, confirm_spreadsheet_id):
+    """Explicit, verified layout switch for a destination. Never resets any allocation cursor.
+
+    Legacy sequential tabs/rows and receipts are preserved. Alphabetical tabs use distinct names,
+    so they cannot collide with legacy rows, and Apps Script still refuses any occupied target row.
+    """
+    if layout not in {"sequential", "alphabetical"}:
+        raise DeliveryError("invalid_layout")
+    cfg = settings()
+    with session() as db:
+        state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
+        if not state:
+            raise DeliveryError("pipeline_uninitialized")
+        if db.scalar(select(ExportBatch.id).where(ExportBatch.status == "CLAIMED").limit(1)):
+            raise DeliveryError("claimed_delivery_pending")
+        target = state.export_spreadsheet_id or cfg.google_spreadsheet_id
+        if not target or not secrets.compare_digest(str(confirm_spreadsheet_id), target):
+            raise DeliveryError("destination_not_confirmed")
+        previous = bound_layout(state)
+        state.export_layout = layout
+        return {"previous_layout": previous, "layout": layout, "legacy_next_position": state.export_next_position,
+                "bucket_positions": dict(state.export_bucket_positions or {})}
+
+
+def shard_status(db, existing_cells=0):
+    """Per-bucket tabs, rows and remaining capacity, plus an exact-size workbook cell estimate."""
+    state = db.get(PipelineState, 1)
+    cfg = settings()
+    shard_rows = (state.export_shard_rows if state and state.export_spreadsheet_id else None) or cfg.sheet_shard_rows
+    positions = dict((state.export_bucket_positions if state else None) or {})
+    groups = {name: int(positions[name]) for name in BUCKETS if positions.get(name)}
+    if state and state.export_next_position:
+        groups["SEQUENTIAL"] = int(state.export_next_position)
+    tabs = []
+    for name, rows in sorted(groups.items()):
+        for index in range(rows // shard_rows + (1 if rows % shard_rows else 0)):
+            used = min(shard_rows, rows - index * shard_rows)
+            tab = f"VALIDATED_{index + 1:03d}" if name == "SEQUENTIAL" else f"VALIDATED_{name}_{index + 1:03d}"
+            tabs.append({"tab": tab, "bucket": name, "data_rows": used, "capacity": shard_rows,
+                         "remaining": shard_rows - used})
+    return {"layout": bound_layout(state) if state else None, "configured_layout": cfg.sheet_layout,
+            "shard_rows": shard_rows, "tabs": tabs,
+            "capacity": capacity_plan(groups, shard_rows, existing_cells=existing_cells)}
 
 
 def acknowledge(body):

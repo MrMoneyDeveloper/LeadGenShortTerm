@@ -63,6 +63,12 @@ class PipelineState(Base):
     export_spreadsheet_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
     export_folder_id: Mapped[str] = mapped_column(String(160), default="", server_default="")
     export_shard_rows: Mapped[int] = mapped_column(Integer, default=5000, server_default="5000")
+    # 0007: layout pinned at first allocation (NULL on a bound destination means legacy sequential).
+    export_layout: Mapped[str | None] = mapped_column(String(16))
+    # Alphabetical layout: next data-row position per bucket ("A".."Z", "OTHER"); never decreases.
+    export_bucket_positions: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    # Distinct qualified finals with usable email at which acquisition stops (persisted at start).
+    campaign_final_target: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
@@ -219,6 +225,7 @@ class ExportBatch(Base):
     count: Mapped[int] = mapped_column(Integer)
     first_position: Mapped[int] = mapped_column(BigInteger)
     shard_rows: Mapped[int] = mapped_column(Integer)
+    layout: Mapped[str] = mapped_column(String(16), default="sequential", server_default="sequential")
     drive_file_id: Mapped[str | None] = mapped_column(String(160))
     ack_digest: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
