@@ -8,7 +8,7 @@ from app.classifiers import groq, semantic
 
 def result():
     return {
-        "is_short_term_insurance_relevant": True, "intent_level": "HIGH", "product_type": "MOTOR",
+        "is_insurance_relevant": True, "intent_level": "HIGH", "product_type": "MOTOR",
         "is_consumer": True, "is_advertisement": False, "is_broker_or_agent": False,
         "south_africa_signal": True, "score": 91, "reason": "Explicit consumer request",
     }

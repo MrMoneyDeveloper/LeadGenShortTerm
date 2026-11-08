@@ -225,6 +225,31 @@ class ExportBatch(Base):
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SampleRecord(Base):
+    """Operator-authorized bounded sample per source for testing/training, with provenance.
+
+    Capped by SAMPLE_STORE_MAX_PER_SOURCE (0 disables). Higher-value outcomes replace lower ones,
+    so the store converges on the most useful examples. Not touched by transient cleanup; removed
+    only through the explicit admin delete endpoints.
+    """
+
+    __tablename__ = "sample_records"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    source_record_id: Mapped[str] = mapped_column(Text)
+    candidate_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    source_url: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    profile: Mapped[dict] = mapped_column(JSONB, default=dict)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[str] = mapped_column(String(32))
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (UniqueConstraint("source", "source_record_id"),)
+
+
 Index("ix_jobs_claim", Job.status, Job.available_at)
 Index("ix_candidates_stage_due", Candidate.status, Candidate.available_at)
 Index("ix_candidates_priority", Candidate.status, Candidate.rank_score.desc(), Candidate.available_at)

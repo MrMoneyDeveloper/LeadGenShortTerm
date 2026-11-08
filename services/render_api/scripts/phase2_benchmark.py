@@ -97,7 +97,7 @@ def main():
     original_semantic = pipeline.semantic.classify
     pipeline.validate_contact = lambda email: ("DELIVERABLE_DOMAIN", "controlled_fixture")
     pipeline.semantic.classify = lambda *_args: SemanticResult(
-        is_short_term_insurance_relevant=True, intent_level="HIGH", product_type="MOTOR",
+        is_insurance_relevant=True, intent_level="HIGH", product_type="MOTOR",
         is_consumer=True, is_advertisement=False, is_broker_or_agent=False,
         south_africa_signal=True, score=90, reason="controlled benchmark semantic fixture",
     )

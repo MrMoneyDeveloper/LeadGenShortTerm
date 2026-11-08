@@ -8,7 +8,7 @@ from app.classifiers.grok import SemanticResult, redact
 
 def semantic():
     return {
-        "is_short_term_insurance_relevant": True,
+        "is_insurance_relevant": True,
         "intent_level": "HIGH",
         "product_type": "MOTOR",
         "is_consumer": True,

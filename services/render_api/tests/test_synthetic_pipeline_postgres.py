@@ -74,7 +74,7 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
         pipeline.semantic,
         "classify",
         lambda text, score: SemanticResult(
-            is_short_term_insurance_relevant=True,
+            is_insurance_relevant=True,
             intent_level="MEDIUM",
             product_type="MOTOR",
             is_consumer=True,

@@ -1,3 +1,4 @@
+import json
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
@@ -8,7 +9,7 @@ from app import jobs
 from app.api.auth import dashboard, operator
 from app.database import session
 from app.models import Candidate, Job, PipelineState, SourceCursor, now
-from app.services import backpressure, campaign, delivery, reporting
+from app.services import backpressure, campaign, delivery, reporting, samples
 
 router = APIRouter()
 
@@ -255,3 +256,35 @@ def export_sources():
 @router.get("/exports/processing-summary", dependencies=[Depends(dashboard)])
 def export_summary():
     return {"summary": reporting.summary(), "queue": reporting.queue(), "failures": reporting.failures()}
+
+
+class SampleDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source: Literal["bluesky", "youtube"] | None = None
+    source_record_id: str | None = Field(None, min_length=1, max_length=400)
+    confirm_all: bool = False
+
+
+@router.get("/dashboard/samples", dependencies=[Depends(dashboard)])
+@router.get("/exports/samples.csv", dependencies=[Depends(dashboard)])
+def sample_store(
+    source: Literal["bluesky", "youtube"] | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+    format: Literal["json", "csv"] = "json",
+):
+    with session() as db:
+        rows = samples.listing(db, source, limit)
+    if format == "json":
+        return {"items": rows, "count": len(rows)}
+    flat = [{**row, "profile": json.dumps(row["profile"], ensure_ascii=False),
+             "detail": json.dumps(row["detail"], ensure_ascii=False, default=str)} for row in rows]
+    return Response(reporting.csv_text(flat, samples.FIELDS), media_type="text/csv",
+                    headers={"Cache-Control": "no-store", "Content-Disposition": 'attachment; filename="samples.csv"'})
+
+
+@router.post("/admin/samples/delete", dependencies=[Depends(operator)])
+def sample_delete(body: SampleDeleteRequest):
+    if not (body.source or body.source_record_id or body.confirm_all):
+        raise HTTPException(422, "source, source_record_id or confirm_all required")
+    with session() as db:
+        return {"deleted": samples.remove(db, body.source, body.source_record_id)}

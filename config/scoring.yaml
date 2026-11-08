@@ -1,4 +1,4 @@
-version: rules-v2
+version: rules-v3
 weights:
   quote: 35
   recommendation: 30
@@ -6,6 +6,7 @@ weights:
   premium: 20
   vehicle: 15
   property: 15
+  family: 10
   south_africa: 15
   insurer: 10
   broker: -60
@@ -21,6 +22,8 @@ max_age_days: 30
 # South African evidence boosts the score, but absence alone must not hard-reject otherwise strong intent.
 require_south_africa: false
 negative_signals: [broker, job, advertisement, news, non_target]
+# Personal short-term and long-term products that count as in-scope leads.
+target_products: [MOTOR, HOME, CONTENTS, LIFE, FUNERAL, DISABILITY]
 ranking:
   version: ordinal-rank-v2
   # These are configurable operating thresholds, not measured probabilities.

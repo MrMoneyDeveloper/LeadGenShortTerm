@@ -42,6 +42,8 @@ def profile(record):
         "username": clean_label(record.username),
         "business_name": clean_label(record.business_name),
         "urls": list(dict.fromkeys(url for item in record.urls[:10] if (url := public_url(item))))[:5],
+        "bio": clean_label(record.bio, 1000),
+        "profile_url": public_url(record.profile_url),
         "metadata": {
             key: clean_label(value, 200)
             for key, value in record.metadata.items()
@@ -66,6 +68,41 @@ def youtube_profile(top, video):
         # authorDisplayName is not a handle and must not be copied into username.
         urls=[url] if (url := public_url(data.get("authorChannelUrl"))) else [],
         metadata={"video_id": video, "comment_id": top["id"], "channel_id": channel},
+    )
+
+
+def _bluesky_urls(data):
+    urls = []
+    for facet in data.get("facets", [])[:20]:
+        for feature in facet.get("features", [])[:5]:
+            if feature.get("$type") == "app.bsky.richtext.facet#link":
+                urls.append(feature.get("uri", ""))
+    external = (data.get("embed") or {}).get("external", {})
+    if external.get("uri"):
+        urls.append(external["uri"])
+    return urls
+
+
+def bluesky_post_profile(post):
+    """A post view from app.bsky.feed.searchPosts. Handle/display name are explicit public fields."""
+    data, author = post["record"], post["author"]
+    did, rkey = author["did"], post["uri"].rsplit("/", 1)[1]
+    if not did.startswith("did:") or not rkey or "/" in rkey:
+        raise ValueError("invalid_post_uri")
+    published = datetime.fromisoformat(data["createdAt"].replace("Z", "+00:00"))
+    if published.tzinfo is None:
+        raise ValueError("source_timestamp_timezone_missing")
+    return Record(
+        source_record_id=f"{did}/{rkey}",
+        identity=did,
+        text=data.get("text", "")[:16000],
+        url=f"https://bsky.app/profile/{did}/post/{rkey}",
+        published_at=published,
+        display_name=clean_label(author.get("displayName")),
+        username=clean_label(author.get("handle")),
+        urls=_bluesky_urls(data),
+        metadata={"did": did, "rkey": rkey, "collection": "app.bsky.feed.post"},
+        profile_url=f"https://bsky.app/profile/{did}",
     )
 
 

@@ -148,6 +148,25 @@ Anything a worker does not return is matched locally, so a worker outage never s
 loses records. Worker call/failure/circuit state persists in `provider_rate_state`
 (`worker_vercel`, `worker_netlify`) and appears under `remote_workers` in the dashboard summary.
 
+## Targeted sources and sample store
+
+`config/sources.yaml` holds all search phrases. Bluesky `mode: search` runs recency-bounded
+`app.bsky.feed.searchPosts` queries (unauthenticated AppView), sorted latest, `since` the
+recency window on the first pass and the previous pass start (minus `overlap_hours`) afterwards,
+`pages_per_query` pages per phrase, then waits `refresh_hours`. Keyword-matching authors'
+public bios are fetched in bulk (`fetch_profiles`); a contact found in a bio keeps the profile
+URL as its provenance. `mode: firehose` keeps the legacy Jetstream sampler.
+
+YouTube `recent_videos_only`, `region_code` and `relevance_language` narrow video search;
+`store_recent_only` and `require_discovery_match` keep stale or irrelevant comments out of
+storage (they still count as scanned). Each YouTube search costs 100 quota units.
+
+`SAMPLE_STORE_MAX_PER_SOURCE` (default `0` = off; operator value `20`) keeps a bounded,
+priority-replaced sample per source in `sample_records` with provenance and the pipeline
+decision, for testing and training. Read with `GET /dashboard/samples` or
+`GET /exports/samples.csv?format=csv` (read token); delete with `POST /admin/samples/delete`
+(operator token) by `source_record_id`, `source`, or `confirm_all`.
+
 ## Sources and retention
 
 | Variable | Default / use |

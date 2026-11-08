@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import object_session
 
 from app.classifiers import grok, local, semantic
 from app.collectors import ADAPTERS
@@ -27,7 +28,7 @@ from app.models import (
 from app.qualification import digest, normalize, score, term_groups
 from app.ranking import rank, semantic_qualified
 from app.repositories import claim_hashes, metric
-from app.services import backpressure, campaign, remote_workers
+from app.services import backpressure, campaign, remote_workers, samples
 from app.validators import contacts, validate_contact
 
 
@@ -142,14 +143,24 @@ def normalize_batch(limit):
             metric(db, record.source, "processed")
             if str(record.id) in remote:
                 metric(db, record.source, f"remote_{worker}_matched")
+            detail = {k: result[k] for k in ("score", "product_type", "signals", "version")}
             if result["rejected"]:
                 metric(db, record.source, "rejected")
+                relevant = result["product_type"] != "UNKNOWN" or bool(result["signals"])
+                samples.capture(db, record, "rejected_relevant" if relevant else "rejected", detail)
                 if cfg.delete_rejected_immediately:
                     db.delete(record)
                 else:
                     record.status = "REJECTED"
                 continue
             found_contacts = contacts(record.text, record.source_url)
+            bio = (record.profile or {}).get("bio", "")
+            if bio:
+                # Explicit public profile text; provenance is the profile URL, not the post.
+                seen = {c["email"] for c in found_contacts}
+                bio_url = record.profile.get("profile_url") or record.source_url
+                found_contacts += [c for c in contacts(bio, bio_url) if c["email"] not in seen]
+                found_contacts = found_contacts[:5]
             if found_contacts and all(db.get(Dedupe, "email:" + digest(c["email"])) for c in found_contacts):
                 metric(db, record.source, "email_duplicates")
                 db.delete(record)
@@ -181,6 +192,7 @@ def normalize_batch(limit):
                 Classification(candidate_id=candidate.id, provider="rules", version=result["version"], result=result)
             )
             metric(db, record.source, "candidates")
+            samples.capture(db, record, "candidate", {**detail, "contacts_found": len(found_contacts)}, candidate.id)
             if cfg.delete_processed_raw:
                 db.delete(record)
             else:
@@ -190,6 +202,7 @@ def normalize_batch(limit):
 
 def _reject(db, candidate):
     metric(db, candidate.source, "rejected")
+    samples.update(db, candidate.id, "rejected_late", {"final_status": "REJECTED"})
     if candidate.record_id and settings().delete_rejected_immediately:
         db.execute(delete(SourceRecord).where(SourceRecord.id == candidate.record_id))
     db.execute(delete(Dedupe).where(Dedupe.key == "candidate:" + candidate.identity_hash))
@@ -198,6 +211,9 @@ def _reject(db, candidate):
 
 def _terminal(candidate, status):
     candidate.status, candidate.available_at = status, now()
+    db = object_session(candidate)
+    if db is not None:
+        samples.update(db, candidate.id, status.lower(), {"final_status": status})
 
 
 def _usable_contacts(candidate):
@@ -231,6 +247,7 @@ def _finalize(db, candidate):
             identity.email_hash = email_hash
         metric(db, candidate.source, "validated")
         candidate.status, candidate.contacts = "VALIDATED", []
+        samples.update(db, candidate.id, "final", {"final_status": "VALIDATED", "rank_score": candidate.rank_score})
         return True
     _reject(db, candidate)
     return False
@@ -335,6 +352,9 @@ def classify_batch(limit):
                 if org:
                     metric(db, candidate.source, f"{semantic.provider()}_org_{org}_classified")
                 qualified = semantic_qualified(semantic_result)
+                samples.update(db, candidate.id, None, {"semantic": {
+                    "org": org, "intent": semantic_result.intent_level, "product": semantic_result.product_type,
+                    "score": semantic_result.score, "qualified": qualified}})
                 # A semantic pass is a decision, never an automatic or calibrated 10/10.
                 candidate.score, candidate.product_type = semantic_result.score, semantic_result.product_type
             if qualified:

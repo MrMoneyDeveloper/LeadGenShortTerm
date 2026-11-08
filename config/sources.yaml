@@ -1,5 +1,60 @@
 bluesky:
   enabled: true
+  # search: targeted recency-bounded searchPosts over the phrases below (recommended).
+  # firehose: random Jetstream sampling filtered by keywords (legacy; very low yield).
+  mode: search
+  max_requests_per_batch: 12
+  pages_per_query: 2
+  refresh_hours: 6
+  overlap_hours: 1
+  request_delay_seconds: 0.2
+  fetch_profiles: true
+  queries:
+    # Short-term personal insurance
+    - '"car insurance"'
+    - '"motor insurance"'
+    - '"vehicle insurance"'
+    - '"car insurance" quote'
+    - '"home insurance"'
+    - '"household insurance"'
+    - '"contents insurance"'
+    - '"short term insurance"'
+    - '"short-term insurance"'
+    # Long-term personal insurance
+    - '"life insurance"'
+    - '"life cover"'
+    - '"funeral cover"'
+    - '"funeral policy"'
+    - '"funeral plan"'
+    - '"disability cover"'
+    - '"income protection"'
+    - '"long term insurance"'
+    # Intent phrasing
+    - insurance recommendations
+    - '"which insurer"'
+    - '"switch insurer"'
+    - '"insurance quote"'
+    - insurance premium increase
+    # South African context and insurers
+    - insurance south africa
+    - insurance joburg
+    - insurance "cape town"
+    - insurance durban
+    - outsurance
+    - santam
+    - miway
+    - '"king price"'
+    - '"discovery insure"'
+    - '"old mutual" insurance'
+    - sanlam insurance
+    - clientele funeral
+    - avbob
+    # Afrikaans
+    - versekering
+    - motorversekering
+    - lewensversekering
+    - begrafnispolis
+  # Legacy firehose settings (mode: firehose)
   seconds: 20
   reconnects: 2
   replay_overlap_us: 1000000
@@ -7,10 +62,22 @@ youtube:
   enabled: true
   video_ids: []
   channel_ids: []
-  queries: [car insurance South Africa, home insurance South Africa]
+  # Each search costs 100 quota units; keep this list short on the Free quota.
+  queries:
+    - car insurance South Africa
+    - funeral cover South Africa
+    - life insurance South Africa
+    - insurance quote South Africa
+    - best insurance company South Africa
+    - home insurance South Africa
   max_requests_per_batch: 10
   search_unit_cost: 100
   request_delay_seconds: 0.25
   refresh_hours: 24
-  search_pages_per_query: 2
+  search_pages_per_query: 1
   comments_order: time
+  recent_videos_only: true
+  region_code: ZA
+  relevance_language: en
+  store_recent_only: true
+  require_discovery_match: true

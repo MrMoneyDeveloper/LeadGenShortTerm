@@ -6,6 +6,15 @@ relevance_terms:
   - insure
   - insured
   - premium
+  - long term insurance
+  - long-term insurance
+  - assurance
+  - life cover
+  - funeral cover
+  - funeral policy
+  - insurance policy
+  - versekering
+  - versekeraar
 
 products:
   MOTOR:
@@ -24,6 +33,13 @@ products:
     - insurance for my vehicle
     - bakkie insurance
     - bakkie cover
+    - car insurance quote
+    - comprehensive cover
+    - comprehensive car insurance
+    - third party fire and theft
+    - third party insurance
+    - motorversekering
+    - karversekering
   HOME:
     - home insurance
     - house insurance
@@ -36,6 +52,9 @@ products:
     - insurance for my house
     - homeowner insurance
     - homeowners insurance
+    - buildings insurance
+    - geyser cover
+    - huisversekering
   CONTENTS:
     - contents insurance
     - household contents
@@ -48,6 +67,35 @@ products:
     - household insurance
     - belongings insurance
     - insure my belongings
+    - cellphone insurance
+    - phone insurance
+    - laptop insurance
+    - inhoudversekering
+  LIFE:
+    - life insurance
+    - life cover
+    - life policy
+    - life assurance
+    - term life
+    - insure my life
+    - lewensversekering
+    - lewenspolis
+  FUNERAL:
+    - funeral cover
+    - funeral policy
+    - funeral insurance
+    - funeral plan
+    - burial society
+    - begrafnispolis
+    - begrafnisversekering
+  DISABILITY:
+    - disability cover
+    - disability insurance
+    - income protection
+    - income protector
+    - critical illness cover
+    - dread disease cover
+    - severe illness cover
 
 signals:
   quote:
@@ -75,6 +123,28 @@ signals:
     - quote please
     - quote pls
     - want a quote
+    - looking for life insurance
+    - looking for life cover
+    - looking for funeral cover
+    - looking for a funeral policy
+    - need life insurance
+    - need life cover
+    - need funeral cover
+    - need a funeral policy
+    - need disability cover
+    - need income protection
+    - life insurance quote
+    - funeral cover quote
+    - quote for life insurance
+    - quote for funeral cover
+    - cheapest car insurance
+    - affordable insurance
+    - affordable car insurance
+    - affordable life cover
+    - affordable funeral cover
+    - get a quote
+    - getting quotes
+    - shopping around for insurance
   recommendation:
     - recommend insurance
     - recommend an insurer
@@ -90,6 +160,17 @@ signals:
     - best vehicle insurance
     - who should i insure with
     - who do you use for insurance
+    - best life insurance
+    - best life cover
+    - best funeral cover
+    - best funeral policy
+    - any recommendations
+    - which insurance
+    - which insurance company
+    - good insurance company
+    - who has good insurance
+    - insurance advice
+    - advice on insurance
   switch:
     - switch insurance
     - switch insurer
@@ -104,6 +185,9 @@ signals:
     - leave my insurer
     - cancel my insurance
     - looking to move insurers
+    - switch my life cover
+    - replace my life cover
+    - cancel my funeral policy
   premium:
     - premium increased
     - premium increase
@@ -121,6 +205,12 @@ signals:
     - too pricey
     - renewal premium
     - price increase
+    - premiums went up
+    - premium hike
+    - excess too high
+    - claim rejected
+    - claim was rejected
+    - claim declined
   vehicle:
     - new car
     - bought a car
@@ -145,6 +235,20 @@ signals:
     - moving house
     - home loan
     - bond approved
+    - first home
+    - moved into
+    - renting a flat
+    - new flat
+  family:
+    - new baby
+    - having a baby
+    - just got married
+    - getting married
+    - my family
+    - my kids
+    - breadwinner
+    - passed away
+    - pay for the funeral
   south_africa:
     - south africa
     - south african
@@ -171,6 +275,35 @@ signals:
     - umhlanga
     - ballito
     - mzansi
+    - rsa
+    - soweto
+    - sandton
+    - midrand
+    - centurion
+    - randburg
+    - roodepoort
+    - benoni
+    - boksburg
+    - germiston
+    - krugersdorp
+    - polokwane
+    - bloemfontein
+    - gqeberha
+    - port elizabeth
+    - east london
+    - stellenbosch
+    - pietermaritzburg
+    - mbombela
+    - nelspruit
+    - kimberley
+    - rustenburg
+    - jozi
+    - eskom
+    - load shedding
+    - loadshedding
+    - sassa
+    - eish
+    - howzit
   insurer:
     - outsurance
     - discovery insure
@@ -183,6 +316,25 @@ signals:
     - old mutual insure
     - momentum insure
     - naked insurance
+    - old mutual
+    - sanlam
+    - liberty life
+    - momentum life
+    - discovery life
+    - clientele
+    - avbob
+    - assupol
+    - 1life
+    - metropolitan life
+    - brightrock
+    - capitec funeral
+    - capitec life
+    - absa life
+    - fnb life
+    - standard bank insurance
+    - dotsure
+    - first for women
+    - virseker
   broker:
     - insurance broker
     - insurance brokerage
@@ -224,9 +376,6 @@ signals:
     - research paper
     - insurance regulation
   non_target:
-    - life insurance
-    - funeral cover
-    - funeral insurance
     - medical aid
     - health insurance
     - gap cover

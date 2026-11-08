@@ -159,6 +159,7 @@ Current head `0005_semantic_drain_deadline` adds a campaign semantic deadline wi
 | `pipeline_metrics` | Aggregate daily counters |
 | `api_usage` | Provider usage/tokens and historical reference-price metadata; Free-plan cost is zero |
 | `provider_rate_state` | Persistent request/token reservations, rate windows, provider headers and cooldown |
+| `sample_records` | `0006_sample_store`: operator-authorized bounded per-source sample with provenance (testing/training) |
 | `failed_jobs` | Sanitized failure codes |
 | `export_batches` | Active immutable delivery payload, then compact ACK receipt |
 

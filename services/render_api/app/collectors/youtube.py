@@ -8,6 +8,7 @@ from app.collectors.base import Batch, SourceError
 from app.collectors.profiles import youtube_profile
 from app.config import rules, settings
 from app.models import now
+from app.qualification import discovery_match
 from app.repositories import reserve
 
 
@@ -33,6 +34,7 @@ class YouTube:
             state = {"target": 0, "page": "", "videos": [], "comment_page": "", "search_pages": 0}
             result.cursor = state
         deadline = time.monotonic() + env.job_seconds - 5
+        recency_cutoff = now() - timedelta(days=rules("scoring").get("max_age_days", 30))
         requests = 0
 
         def fetch(client, path, params):
@@ -84,6 +86,12 @@ class YouTube:
                             state["discovery_done"] = True
                         elif not state.get("discovery_done"):
                             params = {"part": "id", "type": "video", "maxResults": 50, "order": "date", **target}
+                            if cfg.get("recent_videos_only"):
+                                # Old videos mostly carry stale comments that fail the recency rule anyway.
+                                params["publishedAfter"] = recency_cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+                            for key, name in (("region_code", "regionCode"), ("relevance_language", "relevanceLanguage")):
+                                if cfg.get(key) and "q" in target:
+                                    params[name] = cfg[key]
                             if state["page"]:
                                 params["pageToken"] = state["page"]
                             data = fetch(client, "search", params)
@@ -114,6 +122,11 @@ class YouTube:
                         try:
                             record = youtube_profile(item["snippet"]["topLevelComment"], video)
                         except (KeyError, ValueError, TypeError):
+                            continue
+                        # Optional discovery filters keep stale or irrelevant comments out of storage.
+                        if cfg.get("store_recent_only") and record.published_at < recency_cutoff:
+                            continue
+                        if cfg.get("require_discovery_match") and not discovery_match(record.text):
                             continue
                         result.records.append(record)
                     state["comment_page"] = data.get("nextPageToken", "")

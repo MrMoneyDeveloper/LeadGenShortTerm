@@ -18,6 +18,10 @@ class Record:
     first_name: str = ""
     name_reliable: bool = False
     name_source: str = ""
+    # Explicit public profile text (e.g. a Bluesky bio) and its URL: a contact found there keeps
+    # the profile URL as its provenance. Never used for scoring or name inference.
+    bio: str = ""
+    profile_url: str = ""
 
 
 @dataclass

@@ -7,7 +7,7 @@ def rank(result, valid_contact, ml=None):
     cfg = rules("scoring")
     policy = cfg["ranking"]
     signals = result.get("signals", [])
-    product = result.get("product_type") in {"MOTOR", "HOME", "CONTENTS"}
+    product = result.get("product_type") in set(cfg.get("target_products", ["MOTOR", "HOME", "CONTENTS"]))
     geography_signal = "south_africa" in signals
     geography_gate = geography_signal or not cfg["require_south_africa"]
     confident_ml = ml and ml["confidence"] >= cfg["local_confidence"]
@@ -50,12 +50,12 @@ def rank(result, valid_contact, ml=None):
 def semantic_qualified(result):
     cfg = rules("scoring")
     return (
-        result.is_short_term_insurance_relevant
+        result.is_insurance_relevant
         and result.is_consumer
         and not result.is_advertisement
         and not result.is_broker_or_agent
         and result.intent_level in {"HIGH", "MEDIUM"}
-        and result.product_type in {"MOTOR", "HOME", "CONTENTS"}
+        and result.product_type in set(cfg.get("target_products", ["MOTOR", "HOME", "CONTENTS"]))
         and result.score >= cfg["ranking"]["semantic_accept_score"]
         and (result.south_africa_signal or not cfg["require_south_africa"])
     )

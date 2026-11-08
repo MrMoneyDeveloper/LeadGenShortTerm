@@ -25,7 +25,7 @@ def candidate(db, name, score, email=True):
 
 
 def semantic_pass():
-    return SemanticResult(is_short_term_insurance_relevant=True, is_consumer=True,
+    return SemanticResult(is_insurance_relevant=True, is_consumer=True,
                           is_advertisement=False, is_broker_or_agent=False,
                           intent_level="HIGH", product_type="MOTOR", south_africa_signal=True,
                           score=85, reason="Public consumer intent")

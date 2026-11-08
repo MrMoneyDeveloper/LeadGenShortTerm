@@ -43,7 +43,7 @@ public source adapters
   -> bounded collection + source profile
   -> Render FastAPI processing
   -> PostgreSQL temporary durable queues/checkpoints
-  -> deterministic short-term-insurance rules
+  -> deterministic personal-insurance rules (short- and long-term)
   -> contact extraction + syntax/DNS/MX validation
   -> local TF-IDF/logistic model + ranking
   -> DIRECT_FINAL / REJECT where clear
@@ -107,6 +107,12 @@ campaign dedupe/checkpoint/compact receipts -> retain as required for idempotenc
 
 Do not create an archive of rejected/raw source material.
 
+**Operator-authorized exception (2026-11-08):** a bounded sample store (`sample_records`,
+`SAMPLE_STORE_MAX_PER_SOURCE`, intended value 20 per source platform) keeps public records with
+their provenance and pipeline decision for pre-Phase-4 testing and model training. It is capped,
+not touched by transient cleanup, and removed only via `/admin/samples/delete` (for example when a
+person declines). Do not raise the cap into a general archive.
+
 Preserve bounded source provenance needed to explain where a final lead came from.
 
 ## Database rules
@@ -168,9 +174,17 @@ Never infer a name merely from an email username, handle, company slug, or uncer
 
 ## Source and ranking rules
 
-This project targets **South African short-term insurance** leads.
+This project targets **South African personal insurance** leads: short-term (motor, home,
+contents) and, since 2026-11-08 by operator decision, long-term (life, funeral,
+disability/income protection). Medical aid, health/gap cover and investment/retirement
+products remain non-target. In-scope products are listed in `config/scoring.yaml`
+`target_products`.
 
 Search terms, product terms, exclusions, South African signals, and ranking weights belong in repository configuration/fixtures rather than collector source code.
+
+Prefer targeted, recency-bounded source search (`config/sources.yaml`) over random sampling.
+Contacts may come from post text or an explicit public profile field (e.g. a Bluesky bio); the
+contact keeps the URL where it was found as provenance.
 
 Test ranking quality, not merely API success.
 

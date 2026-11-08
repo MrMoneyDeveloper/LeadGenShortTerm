@@ -112,6 +112,9 @@ class Settings(BaseSettings):
     semantic_max_attempts: int = Field(2, ge=1, le=3)
     semantic_timeout_seconds: int = Field(20, ge=5, le=60)
 
+    # Operator-authorized bounded sample per source for testing/training (0 disables).
+    sample_store_max_per_source: int = Field(0, ge=0, le=200)
+
     raw_retention_days: int = Field(3, ge=1, le=30)
     candidate_retention_days: int = Field(30, ge=1)
     terminal_candidate_retention_hours: int = Field(24, ge=0, le=168)

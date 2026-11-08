@@ -27,6 +27,8 @@ def test_bluesky_checkpoint_and_limit(monkeypatch):
             return json.dumps(event)
 
     monkeypatch.setattr(bluesky, "connect", lambda *args, **kwargs: Socket())
+    firehose = {"mode": "firehose", "seconds": 20, "reconnects": 2, "replay_overlap_us": 1000000}
+    monkeypatch.setattr(bluesky, "rules", lambda _name: {"bluesky": firehose})
     result = bluesky.Bluesky().collect({}, 1)
     assert result.scanned == 1 and len(result.records) == 1
     assert result.cursor["time_us"] == 100

@@ -16,9 +16,24 @@ def test_strong_short_term_intent_survives_domain_filter():
         assert result["score"] >= 25
 
 
+def test_long_term_personal_insurance_is_in_scope():
+    cases = [
+        ("Need life insurance in Durban, any recommendations?", "LIFE"),
+        ("Looking for funeral cover for my parents in Soweto, need a quote", "FUNERAL"),
+        ("Self-employed in Pretoria and need income protection, which insurer is best?", "DISABILITY"),
+        ("Soek lewensversekering in Kaapstad, enige aanbevelings? need a quote", "LIFE"),
+    ]
+    for text, product in cases:
+        result = score(text, "bluesky", now())
+        assert result["product_type"] == product, text
+        assert not result["rejected"], text
+        assert rank(result, True)["hard_gates"]["product"]
+
+
 def test_non_target_seller_job_and_news_are_hard_negatives():
     samples = [
-        "Need life insurance in Durban",
+        "Need medical aid in Durban",
+        "Best retirement annuity investment product",
         "Insurance broker in Johannesburg; contact me for insurance",
         "Insurance jobs hiring in Cape Town",
         "Insurance news annual report and industry report from South Africa",
