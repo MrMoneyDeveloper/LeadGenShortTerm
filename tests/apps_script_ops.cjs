@@ -25,7 +25,7 @@ function load(now) {
     Utilities: {DigestAlgorithm: {SHA_256: 'sha256'}, Charset: {UTF_8: 'utf8'},
       computeDigest: (_a, text) => Array.from(crypto.createHash('sha256').update(text, 'utf8').digest()).map(x => (x > 127 ? x - 256 : x))},
   });
-  for (const name of ['Code.gs', 'Controls.gs']) vm.runInContext(fs.readFileSync('apps-script/' + name, 'utf8'), context);
+  for (const name of ['Code.gs', 'Controls.gs', 'Delivery.gs']) vm.runInContext(fs.readFileSync('apps-script/' + name, 'utf8'), context);
   const ops = fs.readFileSync('apps-script/Ops.gs', 'utf8').replace(/const OPS_SECRET_SHA256 = '[^']*';/, `const OPS_SECRET_SHA256 = '${HASH}';`);
   vm.runInContext(ops, context);
   const post = body => JSON.parse(context.doPost({postData: {contents: JSON.stringify(body)}}).text);
@@ -83,6 +83,17 @@ check('trigger installation respects the existing property gates', () => {
 check('unknown actions are refused', () => {
   const {post} = load(before);
   assert.equal(post({action: 'eval', secret: SECRET}).status, 'unknown_action');
+});
+
+check('snapshot returns only counts, a spreadsheet hash and capture time', () => {
+  const {post, props, context} = load(before);
+  props.set('GOOGLE_SPREADSHEET_ID', 'sheet-x');
+  const tab = (name, last) => ({getName: () => name, getLastRow: () => last});
+  context.sheet_ = () => ({getSheets: () => [tab('VALIDATED_A_001', 4), tab('PROSPECTS_001', 2), tab('SUMMARY', 30)]});
+  const result = post({action: 'snapshot', secret: SECRET});
+  assert.deepEqual(JSON.parse(JSON.stringify(result.snapshot.tabs)), {VALIDATED_A_001: 3, PROSPECTS_001: 1});
+  assert.equal(result.snapshot.spreadsheet_sha256, crypto.createHash('sha256').update('sheet-x').digest('hex'));
+  assert.ok(!JSON.stringify(result).includes('sheet-x'));
 });
 
 console.log(`apps-script ops tests: ${passed} passed (offline mocks only)`);

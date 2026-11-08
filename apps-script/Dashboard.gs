@@ -5,7 +5,7 @@ function sheet_() {
 }
 
 function writeRows_(name, rows, fields) {
-  if (/^VALIDATED_/.test(name) || name === 'EXPORT_INDEX') throw new Error('DELIVERY_APPEND_ONLY_TAB');
+  if (/^(VALIDATED|PROSPECTS)_/.test(name) || name === 'EXPORT_INDEX') throw new Error('DELIVERY_APPEND_ONLY_TAB');
   const book = sheet_();
   const tab = book.getSheetByName(name) || book.insertSheet(name);
   fields = fields || Array.from(new Set(rows.reduce((a, r) => a.concat(Object.keys(r)), [])));

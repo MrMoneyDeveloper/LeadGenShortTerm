@@ -119,6 +119,9 @@ def test_sequential_destination_is_never_switched_blindly(postgres, isolated_set
         delivery.adopt_layout("sequential", "sheet_test")
     with postgres() as db:
         assert db.get(PipelineState, 1).export_next_position == 1  # legacy cursor preserved
+    with pytest.raises(delivery.DeliveryError, match="adopt_destination_sequential_only"):
+        delivery.adopt_destination(5)
+    isolated_settings.sheet_layout = "sequential"
     with pytest.raises(delivery.DeliveryError, match="destination_already_in_use"):
         delivery.adopt_destination(5)
 
@@ -257,7 +260,7 @@ def test_export_batches_record_layout(postgres, isolated_settings):
         assert db.scalar(select(ExportBatch.layout)) == "alphabetical"
 
 
-def test_lead_without_email_is_finalized_and_delivered_by_handle_bucket(postgres, isolated_settings, monkeypatch):
+def test_lead_without_email_is_finalized_and_delivered_to_prospects(postgres, isolated_settings, monkeypatch):
     destination(isolated_settings)
     monkeypatch.setattr(pipeline.local, "classify", lambda _text: None)
     with postgres() as db:
@@ -277,7 +280,8 @@ def test_lead_without_email_is_finalized_and_delivered_by_handle_bucket(postgres
         assert db.get(Dedupe, "lead:" + digest("no-email"))
     batch = delivery.claim()
     item = batch["items"][0]
-    assert item["tab"] == "VALIDATED_K_001" and item["values"][7] == "" and item["values"][15] == "NO_EMAIL"
+    # Prospects never enter the VALIDATED_* email dataset.
+    assert item["tab"] == "PROSPECTS_001" and item["values"][7] == "" and item["values"][15] == "NO_EMAIL"
     delivery.acknowledge(receipt(batch))
     # The same identity can never be admitted twice.
     with postgres() as db:

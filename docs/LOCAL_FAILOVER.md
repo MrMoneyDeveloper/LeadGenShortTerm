@@ -125,27 +125,39 @@ cleared on start.
 ## Recovering a fresh or replaced database
 
 Before any delivery or acquisition on a new database, recover from the finished Google dataset.
-Inputs: the verified Drive delivery files (`lead-delivery-*.json`, downloaded into one folder) and a
-JSON file of each `VALIDATED_*` tab's data-row count from the `SHARD_INDEX` tab
-(e.g. `{"VALIDATED_A_001": 812, "VALIDATED_001": 6}`).
+
+1. Download every verified Drive delivery file (`lead-delivery-*.json`) into one folder.
+2. Immediately before recovery, save a **current destination snapshot** from the live Sheet. The Apps
+   Script ops `snapshot` action returns only the spreadsheet ID's SHA-256, the capture time and each
+   `VALIDATED_*` / `PROSPECTS_*` tab's data-row count.
 
 ```powershell
 cd services\render_api
 ..\..\.venv\Scripts\python -m alembic -c alembic.ini upgrade head
-..\..\.venv\Scripts\python -m app.cli recover --deliveries C:\path\deliveries --tab-rows C:\path\tab_rows.json
-..\..\.venv\Scripts\python -m app.cli recover --deliveries C:\path\deliveries --tab-rows C:\path\tab_rows.json --apply
+..\..\.venv\Scripts\python -m app.cli recover --deliveries C:\path\deliveries --snapshot C:\path\snapshot.json
+..\..\.venv\Scripts\python -m app.cli recover --deliveries C:\path\deliveries --snapshot C:\path\snapshot.json --apply
 ```
 
-The dry run validates every file's checksum and requires every row `2..n+1` of every tab to be
-covered exactly once. Empty, partial, tampered or conflicting inputs are refused. The delivery JSON
-is lossless (no CSV formula escaping), so a value like `+alice@...` hashes exactly as delivered.
-`--apply` (fresh database only) bulk-inserts the `email:`, `record:` and Bluesky `lead:` hashes in
-1,000-key chunks, restores the per-letter and legacy row cursors so the next claim continues after
-the last occupied Google row, binds and verifies the destination, then re-reads everything and fails
-unless it all matches. Until recovery (or `confirm-empty-destination` for a brand-new empty Sheet),
-a fresh database refuses delivery claims (`destination_unverified`). Labelled `SYNTHETIC_TEST` rows
-keep their positions but create no hashes. YouTube identities aren't in the delivered URL, so YouTube
-people are protected by comment and email hashes only.
+What the dry run checks:
+- **Snapshot:** taken within 30 minutes, and its hash matches the configured spreadsheet.
+- **Each file:** the exact field schema, typed batch and lead identifiers, `campaign:id` values consistent with the item, bounded value lengths, and the checksum.
+- **Coverage:** every row `2..n+1` of every snapshot tab is covered exactly once. Empty, partial, stale, tampered or conflicting inputs are refused.
+
+`--apply` (fresh database only) restores:
+- the dedupe hashes, in 1,000-key bulk inserts;
+- one compact ACKNOWLEDGED receipt per delivered batch, with counts and qualified counts but no personal payload, so progress toward the target survives;
+- the per-letter, prospect and legacy row cursors;
+- the lead-ID sequence, set above every imported ID so new IDs never reuse delivered ones;
+- the destination binding, with its exact approval tuple and the configured campaign.
+
+It then re-reads everything and fails unless it all matches.
+
+A fresh database refuses delivery claims until recovery, or until `confirm-empty-destination` for a
+brand-new empty Sheet. That approval is bound to the exact spreadsheet, folder, layout and shard size.
+`adopt-destination` (a single sequential offset) is refused for the alphabetical layout.
+
+Leads without an email are prospects. They go to `PROSPECTS_###` tabs, never to the `VALIDATED_*`
+email dataset, and never count toward the target.
 
 ## Tested guarantees
 
@@ -156,6 +168,8 @@ Database guarantees (covered by tests against PostgreSQL):
   run verify the epoch under a shared lock. After a takeover, a still-running stale executor cannot
   commit anything, including job status (tested with both workers live and the old lock connection
   terminated server-side). Takeover waits for an in-flight stale transaction to finish.
+- A takeover during an open stale transaction waits for it to commit; the stale executor's next
+  transaction is then rejected (tested with a held-open transaction).
 - An abandoned job is reclaimed and completed by the new owner; its records are processed once.
 - Database errors anywhere in a watchdog cycle pause that cycle and retry; the watchdog keeps running.
 

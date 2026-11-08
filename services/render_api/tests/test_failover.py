@@ -426,3 +426,58 @@ def test_database_failure_during_verification_or_execution_pauses_instead_of_exi
     monkeypatch.setattr(failover, "probe_http", exploding)
     state2, report = failover.safe_cycle(cfg, state, session_factory=postgres)
     assert report["action"] == "paused_error" and state2 == state  # loop keeps running, state intact
+
+
+@pytest.mark.integration
+def test_takeover_during_an_open_stale_transaction_waits_then_fences(postgres, isolated_settings):
+    import threading
+    import time
+
+    from app.database import FENCE_EPOCH, StaleExecutor
+    from app.models import ExecutorFence, PipelineState
+
+    jobs.initialize()
+    with postgres() as db:
+        db.get(PipelineState, 1).paused = True
+    epoch_a = jobs.take_ownership()
+    in_txn, release_a, b_result = threading.Event(), threading.Event(), {}
+    outcome = {}
+
+    def worker_a():
+        token = FENCE_EPOCH.set(epoch_a)
+        try:
+            with postgres() as db:  # open transaction: fence verified FOR SHARE at begin
+                db.get(PipelineState, 1).paused = False
+                db.flush()
+                in_txn.set()
+                assert release_a.wait(60)
+            outcome["first"] = "committed"
+            try:
+                with postgres() as db:
+                    db.get(PipelineState, 1).paused = True
+                outcome["second"] = "committed"
+            except StaleExecutor:
+                outcome["second"] = "fenced"
+        finally:
+            FENCE_EPOCH.reset(token)
+
+    def worker_b():
+        started = time.monotonic()
+        b_result["epoch"] = jobs.take_ownership()
+        b_result["waited"] = time.monotonic() - started
+
+    a = threading.Thread(target=worker_a)
+    a.start()
+    assert in_txn.wait(60)
+    b = threading.Thread(target=worker_b)
+    b.start()
+    time.sleep(1.0)
+    assert "epoch" not in b_result  # takeover blocks while the stale transaction is open
+    release_a.set()
+    a.join(60)
+    b.join(60)
+    assert b_result["epoch"] == epoch_a + 1 and b_result["waited"] >= 1.0
+    assert outcome == {"first": "committed", "second": "fenced"}
+    with postgres() as db:
+        assert db.get(PipelineState, 1).paused is False  # only the pre-takeover transaction landed
+        assert db.get(ExecutorFence, 1).epoch == epoch_a + 1

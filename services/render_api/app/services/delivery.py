@@ -25,6 +25,8 @@ class DeliveryError(ValueError):
 
 
 BUCKETS = [chr(code) for code in range(ord("A"), ord("Z") + 1)] + ["OTHER"]
+# Leads without an email are prospects: kept out of the VALIDATED_* email dataset in PROSPECTS_###.
+PROSPECTS = "PROSPECTS"
 # Conservative default for any Google account type; Workspace files may allow more.
 WORKBOOK_CELL_LIMIT = 10_000_000
 
@@ -37,6 +39,8 @@ def bucket(email):
 
 def placement(layout, position, shard_rows, bucket_name=None):
     shard, row = position // shard_rows + 1, position % shard_rows + 2
+    if bucket_name == PROSPECTS:
+        return f"PROSPECTS_{shard:03d}", row
     if layout == "alphabetical":
         return f"VALIDATED_{bucket_name}_{shard:03d}", row
     return f"VALIDATED_{shard:03d}", row
@@ -57,6 +61,11 @@ def capacity_plan(rows_per_group, shard_rows, fields=None, existing_cells=0, lim
     total = cells + existing_cells
     return {"tabs": tabs, "delivery_cells": cells, "existing_cells": existing_cells, "total_cells": total,
             "cell_limit": limit, "within_limit": total <= limit, "headroom_cells": max(0, limit - total)}
+
+
+def destination_tuple(cfg):
+    return {"spreadsheet_id": cfg.google_spreadsheet_id, "folder_id": cfg.google_drive_backup_folder_id,
+            "layout": cfg.sheet_layout, "shard_rows": cfg.sheet_shard_rows}
 
 
 def bound_layout(state):
@@ -108,8 +117,8 @@ def claim(limit=None):
             or state.export_shard_rows != cfg.sheet_shard_rows
         ):
             raise DeliveryError("final_destination_changed")
-        if (not state.export_spreadsheet_id and not state.export_destination_verified
-                and cfg.require_verified_destination):
+        if (not state.export_spreadsheet_id and cfg.require_verified_destination
+                and state.export_destination_approval != destination_tuple(cfg)):
             # Fresh/replaced database: rows may already exist in Google. Recover or confirm first.
             raise DeliveryError("destination_unverified")
         if bound_layout(state) and bound_layout(state) != cfg.sheet_layout:
@@ -127,17 +136,22 @@ def claim(limit=None):
         items = []
         layout = cfg.sheet_layout
         buckets = dict(state.export_bucket_positions or {})
-        for offset, lead in enumerate(rows):
+        sequential = state.export_next_position
+        for lead in rows:
             if lead.id > 9_007_199_254_740_991:
                 raise DeliveryError("lead_id_exceeds_google_integer_range")
-            if layout == "alphabetical":
-                # Leads without an email are bucketed by their public handle/display label.
-                profile = lead.profile or {}
-                name = bucket(lead.email or profile.get("username") or profile.get("display_name") or "")
+            if not lead.email:
+                name = PROSPECTS  # no email: separate prospect dataset, never a VALIDATED_* tab
+            elif layout == "alphabetical":
+                name = bucket(lead.email)
+            else:
+                name = None
+            if name is None:
+                tab, row = placement(layout, sequential, cfg.sheet_shard_rows)
+                sequential += 1
+            else:
                 tab, row = placement(layout, buckets.get(name, 0), cfg.sheet_shard_rows, name)
                 buckets[name] = buckets.get(name, 0) + 1
-            else:
-                tab, row = placement(layout, state.export_next_position + offset, cfg.sheet_shard_rows)
             profile = lead.profile or {}
             values = {
                 **{key: getattr(lead, key) for key in ("email", "source", "source_url", "email_source_url", "product_type", "score", "validation_status")},
@@ -156,14 +170,12 @@ def claim(limit=None):
             drive_folder_id=cfg.google_drive_backup_folder_id, checksum=checksum(items), fields=FIELDS,
             items=items, count=len(items), qualified_count=sum(1 for lead in rows if campaign.is_qualified(lead)),
             # Alphabetical placements live in the items and the durable bucket cursors.
-            first_position=state.export_next_position if layout == "sequential" else 0,
+            first_position=state.export_next_position if layout == "sequential" else 0,  # receipts only
             shard_rows=cfg.sheet_shard_rows, layout=layout,
         )
         db.add(batch)
-        if layout == "alphabetical":
-            state.export_bucket_positions = buckets  # new dict object so the JSONB change persists
-        else:
-            state.export_next_position += len(items)
+        state.export_bucket_positions = buckets  # new dict object so the JSONB change persists
+        state.export_next_position = sequential
         state.export_layout = layout
         state.export_spreadsheet_id = cfg.google_spreadsheet_id
         state.export_folder_id = cfg.google_drive_backup_folder_id
@@ -180,6 +192,10 @@ def adopt_destination(next_position):
     """
     if type(next_position) is not int or not 0 <= next_position <= 50_000_000:
         raise DeliveryError("invalid_position")
+    cfg = settings()
+    if cfg.sheet_layout != "sequential":
+        # A single sequential offset cannot describe per-letter positions; use recover instead.
+        raise DeliveryError("adopt_destination_sequential_only")
     with session() as db:
         state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
         if not state:
@@ -189,6 +205,7 @@ def adopt_destination(next_position):
             raise DeliveryError("destination_already_in_use")
         state.export_next_position = next_position
         state.export_destination_verified = True
+        state.export_destination_approval = destination_tuple(cfg)
         return {"export_next_position": next_position}
 
 
@@ -204,7 +221,9 @@ def confirm_empty_destination(confirm_spreadsheet_id):
         if not cfg.google_spreadsheet_id or not secrets.compare_digest(str(confirm_spreadsheet_id), cfg.google_spreadsheet_id):
             raise DeliveryError("destination_not_confirmed")
         state.export_destination_verified = True
-        return {"export_destination_verified": True}
+        state.export_destination_approval = destination_tuple(cfg)
+        return {"export_destination_verified": True, "approved": {k: v for k, v in destination_tuple(cfg).items()
+                                                                  if k in {"layout", "shard_rows"}}}
 
 
 def adopt_layout(layout, confirm_spreadsheet_id):
@@ -237,14 +256,15 @@ def shard_status(db, existing_cells=0):
     cfg = settings()
     shard_rows = (state.export_shard_rows if state and state.export_spreadsheet_id else None) or cfg.sheet_shard_rows
     positions = dict((state.export_bucket_positions if state else None) or {})
-    groups = {name: int(positions[name]) for name in BUCKETS if positions.get(name)}
+    groups = {name: int(positions[name]) for name in BUCKETS + [PROSPECTS] if positions.get(name)}
     if state and state.export_next_position:
         groups["SEQUENTIAL"] = int(state.export_next_position)
     tabs = []
     for name, rows in sorted(groups.items()):
         for index in range(rows // shard_rows + (1 if rows % shard_rows else 0)):
             used = min(shard_rows, rows - index * shard_rows)
-            tab = f"VALIDATED_{index + 1:03d}" if name == "SEQUENTIAL" else f"VALIDATED_{name}_{index + 1:03d}"
+            tab = (f"VALIDATED_{index + 1:03d}" if name == "SEQUENTIAL" else f"PROSPECTS_{index + 1:03d}"
+                   if name == PROSPECTS else f"VALIDATED_{name}_{index + 1:03d}")
             tabs.append({"tab": tab, "bucket": name, "data_rows": used, "capacity": shard_rows,
                          "remaining": shard_rows - used})
     return {"layout": bound_layout(state) if state else None, "configured_layout": cfg.sheet_layout,

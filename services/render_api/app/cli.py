@@ -11,7 +11,7 @@ def main():
     parser.add_argument("--layout", choices=["sequential", "alphabetical"], help="adopt-layout: target layout")
     parser.add_argument("--confirm-spreadsheet-id", help="adopt-layout: must equal the bound/configured Sheet ID")
     parser.add_argument("--deliveries", nargs="+", help="recover: Drive lead-delivery-*.json files or folders")
-    parser.add_argument("--tab-rows", help="recover: JSON file {tab: data_rows} from the SHARD_INDEX tab")
+    parser.add_argument("--snapshot", help="recover: JSON from the Apps Script ops 'snapshot' action (taken now)")
     parser.add_argument("--apply", action="store_true", help="recover: write (default: dry run)")
     args = parser.parse_args()
     if args.command == "recover":
@@ -19,8 +19,8 @@ def main():
 
         from app.services import recovery
 
-        tab_rows = json.loads(Path(args.tab_rows).read_text(encoding="utf-8")) if args.tab_rows else {}
-        print(json.dumps(recovery.recover(args.deliveries or [], tab_rows, apply=args.apply)))
+        snapshot = json.loads(Path(args.snapshot).read_text(encoding="utf-8")) if args.snapshot else None
+        print(json.dumps(recovery.recover(args.deliveries or [], snapshot, apply=args.apply), default=str))
         return
     if args.command == "confirm-empty-destination":
         from app.services import delivery

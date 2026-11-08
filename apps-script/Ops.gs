@@ -137,6 +137,14 @@ function doPost(e) {
         return opsOut_({status: 'ok', backup: JSON.parse(props.getProperty('STATUS_BACKUP') || 'null')});
       case 'samples':
         return opsOut_({status: 'ok', rows: writeSamples_()});
+      case 'snapshot': {
+        // Current destination snapshot for database recovery: no values, only counts.
+        const tabs = {};
+        sheet_().getSheets().filter(t => VALIDATED_TAB_.test(t.getName()))
+          .forEach(t => { tabs[t.getName()] = Math.max(0, t.getLastRow() - 1); });
+        return opsOut_({status: 'ok', snapshot: {spreadsheet_sha256: opsHex_(config_().sheet),
+          captured_at: new Date().toISOString(), tabs: tabs}});
+      }
       case 'peek':
         return opsOut_({status: 'ok', peek: peekLeads_(Math.min(Number(request.rows) || 5, 20))});
       default:

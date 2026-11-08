@@ -320,4 +320,20 @@ test('daily backup includes alphabetical and legacy shards in a stable order', (
   assert.deepEqual(e.context.backupSnapshot_().map(item => item.tab),
     ['VALIDATED_001', 'VALIDATED_A_001', 'VALIDATED_OTHER_001', 'VALIDATED_Z_001']);
 });
+test('no-email prospects go to PROSPECTS tabs, indexed and backed up separately', () => {
+  const e = environment(fixture([
+    {lead_id: 31, tab: 'VALIDATED_C_001', row: 2, values: ['phase2:31', 'cat@example.test', 'C']},
+    {lead_id: 32, tab: 'PROSPECTS_001', row: 2, values: ['phase2:32', '', 'Prospect']},
+  ]));
+  e.context.deliverFinalLeads();
+  assert.equal(e.sheets.get('PROSPECTS_001').values[1][0], 'phase2:32');
+  const index = Object.fromEntries(e.sheets.get('SHARD_INDEX').values.slice(1).map(row => [row[0], row]));
+  assert.equal(index.PROSPECTS_001[1], 'PROSPECTS');
+  assert.deepEqual(e.context.backupSnapshot_().map(item => item.tab), ['VALIDATED_C_001', 'PROSPECTS_001']);
+  assert.throws(() => e.context.writeRows_('PROSPECTS_001', [{a: 1}]), /DELIVERY_APPEND_ONLY_TAB/);
+  for (const tab of ['PROSPECTS_1', 'PROSPECT_001', 'PROSPECTS_A_001']) {
+    const bad = environment(fixture([{lead_id: 1, tab, row: 2, values: ['phase2:1', '', 'X']}]));
+    assert.throws(() => bad.context.deliverFinalLeads(), /DELIVERY_PLACEMENT_INVALID/, tab);
+  }
+});
 console.log('apps-script tests: ' + passed + ' passed (offline mocks only)');

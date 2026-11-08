@@ -72,6 +72,8 @@ class PipelineState(Base):
     # 0009: an unbound destination may only be claimed after explicit verification (recovery or
     # confirmed-empty initialization), so a fresh database never starts buckets at row 2 blindly.
     export_destination_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # 0010: the exact destination tuple that was approved/recovered (spreadsheet, folder, layout, shard).
+    export_destination_approval: Mapped[dict | None] = mapped_column(JSONB)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 

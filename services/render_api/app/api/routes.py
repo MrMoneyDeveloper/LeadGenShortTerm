@@ -84,7 +84,7 @@ class ClaimRequest(BaseModel):
 class Placement(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     lead_id: int = Field(ge=1, le=9_007_199_254_740_991)
-    tab: str = Field(pattern=r"^VALIDATED_(?:(?:[A-Z]|OTHER)_)?[0-9]{3,}$", max_length=40)
+    tab: str = Field(pattern=r"^(?:VALIDATED_(?:(?:[A-Z]|OTHER)_)?|PROSPECTS_)[0-9]{3,}$", max_length=40)
     row: int = Field(ge=2)
 
 

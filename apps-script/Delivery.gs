@@ -1,6 +1,7 @@
 /** Final output is append-only. Render owns placement and a durable immutable batch. */
-// Sequential VALIDATED_001 or alphabetical VALIDATED_A_001 ... VALIDATED_Z_001 / VALIDATED_OTHER_001.
-const VALIDATED_TAB_ = /^VALIDATED_(?:([A-Z]|OTHER)_)?\d{3,}$/;
+// Email dataset: sequential VALIDATED_001 or alphabetical VALIDATED_A_001 ... / VALIDATED_OTHER_001.
+// Leads without an email are a separate prospect dataset: PROSPECTS_001, PROSPECTS_002 ...
+const VALIDATED_TAB_ = /^(?:VALIDATED_(?:([A-Z]|OTHER)_)?|(PROSPECTS)_)\d{3,}$/;
 // Keep a margin below the configured workbook cell limit (blank cells count toward it).
 const WORKBOOK_USABLE_FRACTION_ = 0.9;
 
@@ -43,7 +44,8 @@ function refreshShardIndex_(shardRows) {
   const rows = book.getSheets().filter(tab => VALIDATED_TAB_.test(tab.getName())).map(tab => {
     const match = VALIDATED_TAB_.exec(tab.getName());
     const data = Math.max(0, tab.getLastRow() - 1);
-    return {tab: tab.getName(), bucket: match[1] || 'SEQUENTIAL', data_rows: data, capacity: shardRows,
+    return {tab: tab.getName(), bucket: match[2] ? 'PROSPECTS' : (match[1] || 'SEQUENTIAL'), data_rows: data,
+      capacity: shardRows,
       remaining: Math.max(0, shardRows - data), allocated_cells: tab.getMaxRows() * tab.getMaxColumns()};
   }).sort((a, b) => a.tab.localeCompare(b.tab));
   rows.push({tab: 'WORKBOOK_TOTAL', bucket: '', data_rows: rows.reduce((total, row) => total + row.data_rows, 0),
