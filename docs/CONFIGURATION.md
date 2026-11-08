@@ -108,15 +108,17 @@ Legacy xAI/Grok support remains explicit and disabled by default through `GROK_E
 `GROQ_ORG_A_API_KEY` and `GROQ_ORG_B_API_KEY` configure two independent Free-tier
 organizations (`GROQ_API_KEY1`/`GROQ_API_KEY2` are accepted aliases). Without org keys,
 `GROQ_API_KEY` acts as organization A. The same key configured twice counts once.
-`GROQ_ORG_A_ENABLED` / `GROQ_ORG_B_ENABLED` (default `true`) take one org out of rotation.
+`GROQ_ORG_A_ENABLED` / `GROQ_ORG_B_ENABLED` (default `true`) take one org out of use.
 
 Each organization has its own `provider_rate_state` row (`groq_a`, `groq_b`) and its own
 `api_usage` rows. Optional `GROQ_ORG_{A,B}_{RPM,RPD,TPM,TPD}_LIMIT` override the shared
 `GROQ_*_LIMIT` defaults; the `GROQ_*_SOFT_CAP` values apply **per organization**. Provider
 headers update that organization's state only.
 
-The router starts at the next organization in rotation, falls through to the other on
-cooldown, cap, 429, access or network failure, and stops (without spending the other org)
+The organizations have independent usage and are used **one after the other**: every
+call tries organization A first and moves to organization B only when A cannot take it
+(cooldown, cap, 429, access, network or server failure); A is used again as soon as it is
+eligible. The router stops (without spending the other org)
 on content/schema errors. When neither org can accept work, the candidate is deferred to
 the earliest eligible time without consuming a failure attempt. `/dashboard/summary`
 exposes `semantic_orgs` (requests/tokens used and remaining, cooldown, 429s, deferrals)

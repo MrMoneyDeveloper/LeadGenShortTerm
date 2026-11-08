@@ -37,7 +37,7 @@ No outbound email, MWEB sending or production campaign was enabled. `ENVIRONMENT
 
 ## Changes since Phase 2
 
-- Two GroqCloud Free-tier organizations with independent persisted quota state, routing,
+- Two GroqCloud Free-tier organizations with independent persisted quota state, sequential (A then B) use,
   fallthrough and earliest-time deferral; per-org telemetry.
 - Stateless `match_terms` worker contract (Netlify/Vercel), shadow verification, durable circuit
   breaker, local fallback.
@@ -135,10 +135,10 @@ Bluesky source row re-enabled) and the synthetic records, candidates, hashes and
   records operator-directed Phase 3 work.
 - Product scope: `AGENTS.md` and config now cover short- **and** long-term personal insurance,
   but `README.md` and `docs/ARCHITECTURE.md` still describe a short-term-only engine.
-- The Phase 2.5 dual-organization Groq router pools two Free-tier organizations. The latest
-  operator instruction says not to aggregate multiple Groq organizations to bypass provider
-  limits. Organization B can be taken out of rotation with `GROQ_ORG_B_ENABLED=false`; that
-  decision and Groq's terms should be confirmed before Phase 4.
+- Resolved by the operator (2026-11-08): Groq organizations A and B have independent usage and
+  are to be used one after the other. The router changed from per-call rotation to sequential
+  use (A first; B only when A cannot take the call; back to A once eligible). Each organization
+  keeps its own persisted quota state and caps.
 
 ## Phase 3 canary (real sources)
 

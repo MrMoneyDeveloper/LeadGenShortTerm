@@ -117,7 +117,7 @@ zero configured Groq cost from historical reference list-price arithmetic.
 `SEMANTIC_PROVIDER=groq` is the default. GroqCloud and xAI/Grok are separate providers.
 
 Two independent Groq Free-tier organizations are supported. Each keeps its own persisted
-admission state (`groq_a`, `groq_b`); the router falls through to the other organization on
+admission state (`groq_a`, `groq_b`) and they are used one after the other: A first, then B when A cannot take the call. The router falls through on
 cooldown/cap/429 and defers the candidate to the earliest eligible time when neither can accept work.
 
 GroqCloud uses:

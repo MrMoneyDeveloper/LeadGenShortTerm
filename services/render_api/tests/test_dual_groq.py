@@ -50,7 +50,6 @@ def router(isolated_settings, monkeypatch):
     monkeypatch.setattr(groq, "reserve_request", lambda tokens, org: admission[org.provider])
     monkeypatch.setattr(groq, "record_response", lambda headers, status, org: now() + timedelta(minutes=5))
     monkeypatch.setattr(groq, "account_tokens", lambda *args: accounting.append(args))
-    monkeypatch.setattr(groq, "_rotation", iter(range(0, 10_000, 2)))  # always start at org A
     return script, admission, calls, accounting
 
 
@@ -131,11 +130,28 @@ def test_content_error_does_not_spend_the_second_org(router):
     assert keys_used(calls) == ["key-a"]
 
 
-def test_rotation_spreads_starting_org(isolated_settings):
+def test_orgs_are_used_one_after_the_other_a_then_b(isolated_settings):
     configure(isolated_settings)
     orgs = isolated_settings.groq_orgs()
-    starts = {groq.route(orgs)[0].name for _ in range(4)}
-    assert starts == {"a", "b"}
+    assert [[o.name for o in groq.route(orgs)] for _ in range(4)] == [["a", "b"]] * 4
+
+
+def test_org_a_serves_every_call_while_eligible(router):
+    script, _admission, calls, accounting = router
+    script["key-a"].extend([Response(), Response(), Response()])
+    assert [groq.classify("text", 80)._provider_org for _ in range(3)] == ["a", "a", "a"]
+    assert keys_used(calls) == ["key-a"] * 3 and [a[0] for a in accounting] == ["groq_a"] * 3
+
+
+def test_org_b_takes_over_then_a_resumes_after_its_cooldown(router):
+    script, admission, calls, _ = router
+    admission["groq_a"] = ("unit_cap", None)  # A exhausted for the day
+    script["key-b"].extend([Response(), Response()])
+    assert [groq.classify("text", 80)._provider_org for _ in range(2)] == ["b", "b"]
+    admission["groq_a"] = ("ok", None)  # A eligible again (e.g. after reset)
+    script["key-a"].append(Response())
+    assert groq.classify("text", 80)._provider_org == "a"
+    assert keys_used(calls) == ["key-b", "key-b", "key-a"]
 
 
 @pytest.mark.integration

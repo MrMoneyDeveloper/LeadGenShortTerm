@@ -1,14 +1,13 @@
 """Bounded GroqCloud client with a two-organization Free-tier router. Separate from xAI/Grok.
 
-Each configured organization has independent persisted admission state (``groq_a``/``groq_b``).
-A call starts at the next organization in rotation and falls through to another organization
-when one is cooling down, capped or rate limited. When none can accept work the caller receives
-the earliest eligible time so the candidate is deferred without consuming failure attempts.
+Each configured organization has independent usage and persisted admission state
+(``groq_a``/``groq_b``). Organizations are used one after the other: every call tries org A
+first and moves to org B only when A cannot take it (cooldown, cap, 429, access/network/server
+failure). A is used again as soon as it is eligible. When neither can accept work the caller
+receives the earliest eligible time so the candidate is deferred without consuming failure attempts.
 """
 
-import itertools
 import json
-import threading
 import time
 from datetime import timedelta
 
@@ -26,10 +25,6 @@ DEFERRABLE = {"groq_daily_request_cap", "groq_daily_token_cap", "groq_cooldown",
 # Organization-specific failures: another organization may still succeed.
 FALLTHROUGH = DEFERRABLE | {"groq_access_or_model_error", "groq_network", "groq_rate_or_server"}
 
-_rotation = itertools.count()
-_rotation_lock = threading.Lock()
-
-
 class GroqUnavailable(Exception):
     """Only application-owned error codes are ever surfaced."""
 
@@ -40,12 +35,8 @@ class GroqUnavailable(Exception):
 
 
 def route(orgs):
-    """Rotating start position spreads load; persisted admission state remains the authority."""
-    if not orgs:
-        return []
-    with _rotation_lock:
-        start = next(_rotation) % len(orgs)
-    return orgs[start:] + orgs[:start]
+    """Sequential order: org A, then org B. Persisted admission state decides eligibility."""
+    return list(orgs)  # groq_orgs() yields A before B
 
 
 def classify(text, score):
