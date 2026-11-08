@@ -139,6 +139,11 @@ def validate_response(request, data, groups):
     """Strict contract check; never trusts positions, only stable IDs."""
     if not isinstance(data, dict) or set(data) != {"contract", "job_id", "candidate_id", "status", "result"}:
         raise WorkerError("worker_schema")
+    # Exact types: bool/float must not pass as the integer contract version.
+    if type(data["contract"]) is not int or not all(
+        type(data[k]) is str for k in ("job_id", "candidate_id", "status")
+    ):
+        raise WorkerError("worker_schema")
     if (data["contract"], data["job_id"], data["candidate_id"], data["status"]) != (
         CONTRACT_VERSION, request["job_id"], request["candidate_id"], "ok"
     ):
@@ -152,7 +157,8 @@ def validate_response(request, data, groups):
     for item in result["items"]:
         if not isinstance(item, dict) or set(item) != {"id", "matched"} or not isinstance(item["matched"], list):
             raise WorkerError("worker_schema")
-        if item["id"] not in expected or item["id"] in matched:
+        # Check the type before any set/dict lookup: lists/dicts are unhashable.
+        if type(item["id"]) is not str or item["id"] not in expected or item["id"] in matched:
             raise WorkerError("worker_unexpected_id")
         if not all(isinstance(n, str) and n in names for n in item["matched"]) or \
                 len(set(item["matched"])) != len(item["matched"]):
@@ -186,9 +192,16 @@ def call(worker, request, groups, client=None):
         raise WorkerError(f"worker_http_{response.status_code}")
     try:
         data = response.json()
-    except ValueError:
+    except (ValueError, RecursionError):  # includes pathological nesting
         raise WorkerError("worker_invalid_json") from None
-    return validate_response(request, data, groups)
+    try:
+        return validate_response(request, data, groups)
+    except WorkerError:
+        raise
+    except (TypeError, KeyError, AttributeError, ValueError, RecursionError):
+        # Defense in depth: any unforeseen shape is a contract failure, never a crash that would
+        # roll back the caller's normalization transaction and skip the local fallback.
+        raise WorkerError("worker_schema") from None
 
 
 def match_batch(records, groups, job_id=None, client=None):

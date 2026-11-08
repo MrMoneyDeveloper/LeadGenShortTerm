@@ -206,3 +206,76 @@ def test_normalize_stage_uses_worker_and_survives_worker_outage(postgres, isolat
         assert db.query(Candidate).count() == 2  # same decision with and without the remote lane
         names = {m.name: m.value for m in db.query(Metric)}
     assert names.get("remote_vercel_matched") == 1
+
+
+@pytest.mark.parametrize("bad_id", [["r1"], {"id": "r1"}, 1, None, True, 1.5])
+def test_malformed_item_ids_are_contract_errors_not_type_errors(bad_id):
+    req, groups = request(), term_groups()
+    data = response(req, items=[{"id": bad_id, "matched": []}, {"id": "r2", "matched": []}])
+    with pytest.raises(remote_workers.WorkerError, match="worker_unexpected_id"):
+        remote_workers.validate_response(req, data, groups)
+
+
+@pytest.mark.parametrize("field,value", [("contract", True), ("contract", 1.0), ("contract", "1"),
+                                         ("job_id", ["job-1"]), ("candidate_id", {"x": 1})])
+def test_envelope_field_types_are_strict(field, value):
+    req = request()
+    with pytest.raises(remote_workers.WorkerError):
+        remote_workers.validate_response(req, response(req, **{field: value}), term_groups())
+
+
+@pytest.mark.parametrize("payload", [
+    lambda req: response(req, items=[{"id": ["r1"], "matched": []}, {"id": "r2", "matched": []}]),
+    lambda req: response(req, items=[{"id": "r1", "matched": [["relevance"]]}, {"id": "r2", "matched": []}]),
+    lambda req: response(req, items=[{"id": "r1", "matched": [{"g": 1}]}, {"id": "r2", "matched": []}]),
+    lambda req: [response(req)],
+    lambda req: "ok",
+    lambda req: {**response(req), "result": None},
+])
+def test_any_malformed_worker_output_reaches_fallback(isolated_settings, payload, monkeypatch):
+    """No malformed worker body may raise out of match_batch (which would roll back normalization)."""
+    enable(isolated_settings, netlify=False)
+    recorded = []
+    monkeypatch.setattr(remote_workers, "eligible", lambda cfg=None: remote_workers.configured_workers(cfg))
+    monkeypatch.setattr(remote_workers, "_record", lambda worker, ok, code=None, items=0, mismatch=False:
+                        recorded.append((worker.name, ok, code)))
+
+    def handler(request):
+        body = json.loads(request.content)
+        return httpx.Response(200, json=payload(body))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    records = [("r1", "car insurance quote"), ("r2", "weather")]
+    assert remote_workers.match_batch(records, term_groups(), client=client) == ({}, None)
+    assert recorded and recorded[0][0] == "vercel" and recorded[0][1] is False
+    assert recorded[0][2].startswith("worker_")
+
+
+def test_deeply_nested_or_non_json_body_reaches_fallback(isolated_settings, monkeypatch):
+    enable(isolated_settings, netlify=False)
+    recorded = []
+    monkeypatch.setattr(remote_workers, "eligible", lambda cfg=None: remote_workers.configured_workers(cfg))
+    monkeypatch.setattr(remote_workers, "_record", lambda worker, ok, code=None, items=0, mismatch=False:
+                        recorded.append(code))
+    bodies = iter([b"[" * 100000 + b"]" * 100000, b"<html>Authentication Required</html>"])
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=next(bodies))))
+    for _ in range(2):
+        assert remote_workers.match_batch([("r1", "car insurance")], term_groups(), client=client) == ({}, None)
+    assert recorded == ["worker_invalid_json", "worker_invalid_json"]
+
+
+def test_redirects_and_protection_pages_are_failures_without_following(isolated_settings, monkeypatch):
+    """Deployment protection/SSO pages must fail closed; the bearer secret is never sent elsewhere."""
+    enable(isolated_settings, netlify=False)
+    recorded, hosts = [], []
+    monkeypatch.setattr(remote_workers, "eligible", lambda cfg=None: remote_workers.configured_workers(cfg))
+    monkeypatch.setattr(remote_workers, "_record", lambda worker, ok, code=None, items=0, mismatch=False:
+                        recorded.append(code))
+
+    def handler(request):
+        hosts.append(request.url.host)
+        return httpx.Response(307, headers={"location": "https://vercel.com/sso-api?url=x"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert remote_workers.match_batch([("r1", "car insurance")], term_groups(), client=client) == ({}, None)
+    assert recorded == ["worker_http_307"] and hosts == ["v.example"]
