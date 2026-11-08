@@ -103,6 +103,51 @@ Legacy xAI/Grok support remains explicit and disabled by default through `GROK_E
 `XAI_API_KEY`, `XAI_MODEL`, `GROK_DAILY_CANDIDATE_CAP`, `GROK_INPUT_USD_PER_MILLION` and
 `GROK_OUTPUT_USD_PER_MILLION`. These variables do not configure GroqCloud.
 
+### Two GroqCloud organizations
+
+`GROQ_ORG_A_API_KEY` and `GROQ_ORG_B_API_KEY` configure two independent Free-tier
+organizations (`GROQ_API_KEY1`/`GROQ_API_KEY2` are accepted aliases). Without org keys,
+`GROQ_API_KEY` acts as organization A. The same key configured twice counts once.
+`GROQ_ORG_A_ENABLED` / `GROQ_ORG_B_ENABLED` (default `true`) take one org out of rotation.
+
+Each organization has its own `provider_rate_state` row (`groq_a`, `groq_b`) and its own
+`api_usage` rows. Optional `GROQ_ORG_{A,B}_{RPM,RPD,TPM,TPD}_LIMIT` override the shared
+`GROQ_*_LIMIT` defaults; the `GROQ_*_SOFT_CAP` values apply **per organization**. Provider
+headers update that organization's state only.
+
+The router starts at the next organization in rotation, falls through to the other on
+cooldown, cap, 429, access or network failure, and stops (without spending the other org)
+on content/schema errors. When neither org can accept work, the candidate is deferred to
+the earliest eligible time without consuming a failure attempt. `/dashboard/summary`
+exposes `semantic_orgs` (requests/tokens used and remaining, cooldown, 429s, deferrals)
+and `semantic_deferred_queue`.
+
+## Optional stateless remote workers
+
+Render can offload the deterministic term-matching step of normalization to stateless
+Vercel/Netlify functions (`services/stateless_worker`, contract v1, operation `match_terms`).
+Workers receive already-normalized text and pre-normalized term groups only and return
+matched group names by stable item ID. They hold no state and never see contacts decisions,
+credentials or database access. Render keeps scoring, decisions and all durable state.
+
+| Variable | Default / use |
+|---|---|
+| `REMOTE_WORKERS_ENABLED` | `false`; master gate for the remote lane |
+| `VERCEL_ENABLED` / `NETLIFY_ENABLED` | `false`; per-worker gates |
+| `VERCEL_BASE_URL` / `NETLIFY_BASE_URL` | HTTPS origin of the deployed worker |
+| `VERCEL_SHARED_SECRET` / `NETLIFY_SHARED_SECRET` | Bearer secret, minimum 32 characters; also set as the worker's `WORKER_SHARED_SECRET` |
+| `VERCEL_DAILY_CALL_CAP` / `NETLIFY_DAILY_CALL_CAP` | `2000` / `300`; Netlify is a conservative fallback lane |
+| `REMOTE_WORKER_TIMEOUT_SECONDS` | `8` |
+| `REMOTE_WORKER_MAX_ITEMS` | `50` records per call |
+| `REMOTE_WORKER_FAILURE_THRESHOLD` | `3` consecutive failures open the circuit |
+| `REMOTE_WORKER_COOLDOWN_SECONDS` | `900` circuit-open period |
+| `REMOTE_WORKER_VERIFY_RATE` | `1.0`; fraction of remote results recomputed locally; any mismatch discards the batch and opens the circuit |
+
+Vercel is preferred; Netlify is used only when Vercel is disabled, failing, open or capped.
+Anything a worker does not return is matched locally, so a worker outage never stalls or
+loses records. Worker call/failure/circuit state persists in `provider_rate_state`
+(`worker_vercel`, `worker_netlify`) and appears under `remote_workers` in the dashboard summary.
+
 ## Sources and retention
 
 | Variable | Default / use |

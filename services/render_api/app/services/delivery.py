@@ -111,6 +111,24 @@ def claim(limit=None):
         return envelope(batch)
 
 
+def adopt_destination(next_position):
+    """Start row allocation after rows already present in a destination Sheet.
+
+    Only allowed while this database has never claimed a delivery (fresh state), so it can
+    never move allocation backwards or skip rows that this database itself assigned.
+    """
+    if type(next_position) is not int or not 0 <= next_position <= 50_000_000:
+        raise DeliveryError("invalid_position")
+    with session() as db:
+        state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
+        if not state:
+            raise DeliveryError("pipeline_uninitialized")
+        if state.export_spreadsheet_id or state.export_next_position or db.scalar(select(ExportBatch.id).limit(1)):
+            raise DeliveryError("destination_already_in_use")
+        state.export_next_position = next_position
+        return {"export_next_position": next_position}
+
+
 def acknowledge(body):
     # ACK remains available when delivery is disabled, allowing an in-flight verified batch to finish.
     ack_hash = checksum(body)

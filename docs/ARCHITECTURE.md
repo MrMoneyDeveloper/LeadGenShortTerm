@@ -16,6 +16,7 @@ seven-day campaign, outbound email or MWEB sender is authorized yet.
 | Google Sheets | Primary finished dataset: `VALIDATED_001`, `VALIDATED_002`, etc. |
 | Google Drive | Verified per-delivery copies and resumable daily final-Sheet backups |
 | Optional Cloudflare | Wake Render, inspect pressure, request one bounded tick; no lead processing/storage |
+| Optional Vercel / Netlify | Stateless `match_terms` workers (contract v1); Render verifies and falls back locally |
 
 Distribution is by role, not arbitrary percentages of records. No R2/D1 or GitHub Actions are required.
 Only one acquisition/processing scheduler owner should be enabled for a production campaign.
@@ -114,6 +115,10 @@ waits persist without consuming candidate failure attempts. Free-plan reporting 
 zero configured Groq cost from historical reference list-price arithmetic.
 
 `SEMANTIC_PROVIDER=groq` is the default. GroqCloud and xAI/Grok are separate providers.
+
+Two independent Groq Free-tier organizations are supported. Each keeps its own persisted
+admission state (`groq_a`, `groq_b`); the router falls through to the other organization on
+cooldown/cap/429 and defers the candidate to the earliest eligible time when neither can accept work.
 
 GroqCloud uses:
 

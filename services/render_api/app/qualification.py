@@ -19,12 +19,32 @@ def matches(text, phrase):
     return bool(re.search(r"(?<!\w)" + re.escape(normalize(phrase)) + r"(?!\w)", text))
 
 
-def score(text, source, published_at):
+def term_groups():
+    """Ordered, pre-normalized term groups. Pure input for local or remote term matching."""
+    keys = rules("keywords")
+    groups = {"product:" + p: [normalize(t) for t in terms] for p, terms in keys["products"].items()}
+    groups.update({"signal:" + k: [normalize(t) for t in terms] for k, terms in keys["signals"].items()})
+    groups["relevance"] = [normalize(t) for t in keys["relevance_terms"]]
+    return groups
+
+
+def hit(text, normalized_term):
+    return bool(re.search(r"(?<!\w)" + re.escape(normalized_term) + r"(?!\w)", text))
+
+
+def match_terms(text, groups):
+    """Names of groups with at least one whole-phrase hit in already-normalized text, in group order."""
+    return [name for name, terms in groups.items() if any(hit(text, t) for t in terms)]
+
+
+def score(text, source, published_at, matched=None):
+    """``matched`` may come from a verified stateless worker; otherwise matching runs locally."""
     text = normalize(text)
     keys, cfg = rules("keywords"), rules("scoring")
-    product = next((p for p, terms in keys["products"].items() if any(matches(text, t) for t in terms)), "UNKNOWN")
-    signals = [k for k, terms in keys["signals"].items() if any(matches(text, t) for t in terms)]
-    relevant = product != "UNKNOWN" or any(matches(text, term) for term in keys["relevance_terms"])
+    found = set(match_terms(text, term_groups()) if matched is None else matched)
+    product = next((p for p in keys["products"] if "product:" + p in found), "UNKNOWN")
+    signals = [k for k in keys["signals"] if "signal:" + k in found]
+    relevant = product != "UNKNOWN" or "relevance" in found
     value = min(100, max(0, sum(cfg["weights"].get(k, 0) for k in signals) + cfg["source_weights"].get(source, 0)))
     negative = any(k in signals for k in cfg["negative_signals"])
     age = (now() - published_at).total_seconds() / 86400

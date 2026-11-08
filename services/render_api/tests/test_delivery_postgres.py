@@ -173,3 +173,15 @@ def test_delivery_endpoints_enforce_auth_schema_and_conflicting_replay(postgres,
         assert client.post("/exports/ack", json=changed, headers=headers).status_code == 409
         with postgres() as db:
             assert db.get(PipelineState, 1).paused  # Export can drain while collection is paused.
+
+
+def test_adopt_destination_only_on_unused_state_and_offsets_rows(postgres, isolated_settings):
+    setup(postgres, isolated_settings, count=1)
+    with pytest.raises(delivery.DeliveryError, match="invalid_position"):
+        delivery.adopt_destination(-1)
+    assert delivery.adopt_destination(5) == {"export_next_position": 5}
+    batch = delivery.claim()
+    # Five pre-existing data rows with two-row shards: position 5 is VALIDATED_003 row 3.
+    assert [(i["tab"], i["row"]) for i in batch["items"]] == [("VALIDATED_003", 3)]
+    with pytest.raises(delivery.DeliveryError, match="destination_already_in_use"):
+        delivery.adopt_destination(0)

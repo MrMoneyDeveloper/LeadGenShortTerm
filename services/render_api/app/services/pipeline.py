@@ -24,10 +24,10 @@ from app.models import (
     SourceRecord,
     now,
 )
-from app.qualification import digest, normalize, score
+from app.qualification import digest, normalize, score, term_groups
 from app.ranking import rank, semantic_qualified
 from app.repositories import claim_hashes, metric
-from app.services import backpressure, campaign
+from app.services import backpressure, campaign, remote_workers
 from app.validators import contacts, validate_contact
 
 
@@ -133,9 +133,15 @@ def normalize_batch(limit):
             .limit(limit)
             .with_for_update(skip_locked=True)
         ).all()
+        # Optional stateless worker lane; anything it does not return is matched locally.
+        remote, worker = {}, None
+        if records and cfg.remote_workers_enabled:
+            remote, worker = remote_workers.match_batch([(r.id, r.text) for r in records], term_groups())
         for record in records:
-            result = score(record.text, record.source, record.published_at)
+            result = score(record.text, record.source, record.published_at, remote.get(str(record.id)))
             metric(db, record.source, "processed")
+            if str(record.id) in remote:
+                metric(db, record.source, f"remote_{worker}_matched")
             if result["rejected"]:
                 metric(db, record.source, "rejected")
                 if cfg.delete_rejected_immediately:
@@ -316,15 +322,18 @@ def classify_batch(limit):
                     db.add(Failure(source=candidate.source, code=str(exc)))
                     count += 1
                     continue
+                org = getattr(semantic_result, "_provider_org", None)
                 db.add(
                     Classification(
                         candidate_id=candidate.id,
                         provider=semantic.provider(),
                         version=semantic.model(),
-                        result=semantic_result.model_dump(),
+                        result={**semantic_result.model_dump(), "provider_org": org},
                     )
                 )
                 metric(db, candidate.source, semantic.provider() + "_classified")
+                if org:
+                    metric(db, candidate.source, f"{semantic.provider()}_org_{org}_classified")
                 qualified = semantic_qualified(semantic_result)
                 # A semantic pass is a decision, never an automatic or calibrated 10/10.
                 candidate.score, candidate.product_type = semantic_result.score, semantic_result.product_type

@@ -28,13 +28,20 @@ def seconds(value):
     return result if math.isfinite(result) and 0 <= result <= 604800 else None
 
 
-def locked(db):
-    db.execute(insert(ProviderRateState).values(provider="groq", state={}).on_conflict_do_nothing())
-    return db.scalar(select(ProviderRateState).where(ProviderRateState.provider == "groq").with_for_update())
+def locked(db, provider="groq"):
+    db.execute(insert(ProviderRateState).values(provider=provider, state={}).on_conflict_do_nothing())
+    return db.scalar(select(ProviderRateState).where(ProviderRateState.provider == provider).with_for_update())
 
 
-def admit(state, cfg, tokens, current, units=0, used_tokens=0):
-    """Mutates detached JSON under a DB lock; returns a code and eligible timestamp."""
+def admit(state, cfg, tokens, current, units=0, used_tokens=0, org=None):
+    """Mutates detached JSON under a DB lock; returns a code and eligible timestamp.
+
+    ``org`` supplies one organization's provider limits; soft caps from ``cfg`` apply per org.
+    """
+    rpm_limit = org.rpm_limit if org else cfg.groq_rpm_limit
+    rpd_limit = org.rpd_limit if org else cfg.groq_rpd_limit
+    tpm_limit = org.tpm_limit if org else cfg.groq_tpm_limit
+    tpd_limit = org.tpd_limit if org else cfg.groq_tpd_limit
     stamp = current.timestamp()
     day = current.date().isoformat()
     tomorrow = (current + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
@@ -42,10 +49,10 @@ def admit(state, cfg, tokens, current, units=0, used_tokens=0):
         state.update(day=day, daily_requests=units, daily_reserved_tokens=used_tokens)
     events = [event for event in state.get("events", []) if event[0] > stamp - 60]
     state["events"] = events
-    request_cap = min(cfg.groq_daily_request_soft_cap, cfg.groq_rpd_limit,
-                      state.get("requests", {}).get("limit", cfg.groq_rpd_limit))
-    token_cap = min(cfg.groq_tpm_soft_cap, cfg.groq_tpm_limit,
-                    state.get("tokens", {}).get("limit", cfg.groq_tpm_limit))
+    request_cap = min(cfg.groq_daily_request_soft_cap, rpd_limit,
+                      state.get("requests", {}).get("limit", rpd_limit))
+    token_cap = min(cfg.groq_tpm_soft_cap, tpm_limit,
+                    state.get("tokens", {}).get("limit", tpm_limit))
     if tokens > token_cap:
         return "prompt_exceeds_minute_budget", None
     code, retry = "ok", stamp
@@ -53,9 +60,9 @@ def admit(state, cfg, tokens, current, units=0, used_tokens=0):
         code, retry = "cooldown", state["next_allowed_at"]
     elif state["daily_requests"] >= request_cap:
         code, retry = "unit_cap", tomorrow
-    elif state["daily_reserved_tokens"] + tokens > min(cfg.groq_daily_token_soft_cap, cfg.groq_tpd_limit):
+    elif state["daily_reserved_tokens"] + tokens > min(cfg.groq_daily_token_soft_cap, tpd_limit):
         code, retry = "token_cap", tomorrow
-    elif len(events) >= min(cfg.groq_rpm_soft_cap, cfg.groq_rpm_limit):
+    elif len(events) >= min(cfg.groq_rpm_soft_cap, rpm_limit):
         code, retry = "minute_cap", events[0][0] + 60 if events else stamp + 60
     elif sum(event[1] for event in events) + tokens > token_cap:
         code, retry = "minute_cap", events[0][0] + 60 if events else stamp + 60
@@ -77,15 +84,16 @@ def admit(state, cfg, tokens, current, units=0, used_tokens=0):
     return "ok", None
 
 
-def reserve_request(tokens):
+def reserve_request(tokens, org=None):
     cfg, current = settings(), now()
+    provider = org.provider if org else "groq"
     with session() as db:
-        row = locked(db)
+        row = locked(db, provider)
         state = dict(row.state)
-        db.execute(insert(Usage).values(day=current.date(), provider="groq", units=0,
+        db.execute(insert(Usage).values(day=current.date(), provider=provider, units=0,
                                        input_tokens=0, output_tokens=0, estimated_cost=0).on_conflict_do_nothing())
-        usage = db.scalar(select(Usage).where(Usage.day == current.date(), Usage.provider == "groq").with_for_update())
-        result = admit(state, cfg, tokens, current, usage.units, usage.input_tokens + usage.output_tokens)
+        usage = db.scalar(select(Usage).where(Usage.day == current.date(), Usage.provider == provider).with_for_update())
+        result = admit(state, cfg, tokens, current, usage.units, usage.input_tokens + usage.output_tokens, org)
         row.state = state
         if result[0] == "ok":
             usage.units += 1
@@ -96,6 +104,9 @@ def observe(state, headers, status, current):
     headers = {k.lower(): v for k, v in headers.items()}
     stamp = current.timestamp()
     state["last_response_at"] = stamp
+    state["last_status"] = status
+    if status >= 400 and status != 429:
+        state["error_responses"] = state.get("error_responses", 0) + 1
     for kind in ("requests", "tokens"):
         window = dict(state.get(kind, {}))
         reset = seconds(headers.get("x-ratelimit-reset-" + kind))
@@ -124,9 +135,9 @@ def observe(state, headers, status, current):
     return None
 
 
-def record_response(headers, status):
+def record_response(headers, status, org=None):
     with session() as db:
-        row = locked(db)
+        row = locked(db, org.provider if org else "groq")
         state = dict(row.state)
         retry = observe(state, headers, status, now())
         row.state = state

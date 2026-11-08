@@ -1,0 +1,10 @@
+{
+  "name": "leadgen-stateless-worker",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/core.cjs && node --check netlify/functions/worker.js && node --check api/worker.mjs"
+  }
+}

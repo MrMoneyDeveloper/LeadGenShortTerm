@@ -19,6 +19,7 @@ from app.models import (
     Usage,
     now,
 )
+from app.services import remote_workers
 
 LEAD_FIELDS = [
     "id",
@@ -46,10 +47,45 @@ def row_dict(row, fields=None):
 
 def usage_dict(row):
     result = row_dict(row)
-    if row.provider == "groq" and settings().groq_plan == "free":
+    if row.provider.startswith("groq") and settings().groq_plan == "free":
         result["reference_list_price"] = result.pop("estimated_cost")
         result["actual_pipeline_cost"] = 0
         result["plan"] = "free"
+    return result
+
+
+def semantic_orgs(db, cfg):
+    """Free-tier allowance view per Groq organization: used/remaining, cooldown, 429s, deferrals."""
+    result = []
+    today = now().date()
+    for org in cfg.groq_orgs():
+        state = (db.get(ProviderRateState, org.provider) or ProviderRateState(state={})).state or {}
+        usage = db.scalar(select(Usage).where(Usage.day == today, Usage.provider == org.provider))
+        requests_used = usage.units if usage else 0
+        request_cap = min(cfg.groq_daily_request_soft_cap, org.rpd_limit)
+        token_cap = min(cfg.groq_daily_token_soft_cap, org.tpd_limit)
+        reserved = state.get("daily_reserved_tokens", 0) if state.get("day") == today.isoformat() else 0
+        next_allowed = state.get("next_allowed_at", 0)
+        result.append({
+            "org": org.name,
+            "provider": org.provider,
+            "requests_today": requests_used,
+            "request_soft_cap": request_cap,
+            "requests_remaining": max(0, request_cap - requests_used),
+            "input_tokens_today": usage.input_tokens if usage else 0,
+            "output_tokens_today": usage.output_tokens if usage else 0,
+            "reserved_tokens_today": reserved,
+            "token_soft_cap": token_cap,
+            "tokens_remaining": max(0, token_cap - reserved),
+            "provider_limits": {k: state.get(k, {}).get("limit") for k in ("requests", "tokens")},
+            "provider_remaining": {k: state.get(k, {}).get("remaining") for k in ("requests", "tokens")},
+            "cooling_down": next_allowed > now().timestamp(),
+            "next_allowed_at": next_allowed or None,
+            "responses_429": state.get("responses_429", 0),
+            "error_responses": state.get("error_responses", 0),
+            "admission_deferrals": state.get("deferred_count", 0),
+            "plan": cfg.groq_plan,
+        })
     return result
 
 
@@ -94,6 +130,12 @@ def summary():
             "database_bytes": db.scalar(text("SELECT pg_database_size(current_database())")),
             "api_usage": [usage_dict(u) for u in db.scalars(select(Usage).order_by(Usage.day.desc()).limit(12))],
             "provider_rate_state": [row_dict(r) for r in db.scalars(select(ProviderRateState))],
+            "semantic_orgs": semantic_orgs(db, cfg),
+            "semantic_deferred_queue": db.scalar(
+                select(func.count()).select_from(Candidate)
+                .where(Candidate.status == "CLASSIFY", Candidate.available_at > now())
+            ),
+            "remote_workers": remote_workers.status(db),
             "grok_cost_configured": bool(cfg.grok_input_usd_per_million and cfg.grok_output_usd_per_million),
         }
 

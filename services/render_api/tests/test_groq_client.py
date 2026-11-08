@@ -62,7 +62,7 @@ def test_groq_strict_payload_redaction_and_estimated_accounting(isolated_setting
     assert calls[0]["body"]["response_format"]["json_schema"]["strict"]
     assert "person@example.org" not in calls[0]["body"]["messages"][1]["content"]
     assert len(reservations) == 1 and reservations[0][0] > 1024
-    assert accounting == [("groq", 100, 20, 0)]
+    assert accounting == [("groq_a", 100, 20, 0)]
 
 
 def test_groq_rate_retry_caps_and_strict_rejection(isolated_settings, monkeypatch):

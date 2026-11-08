@@ -4,7 +4,7 @@ import time
 from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from app.config import settings
 from app.repositories import account_tokens, reserve
@@ -22,6 +22,8 @@ class SemanticResult(BaseModel):
     south_africa_signal: bool
     score: int = Field(ge=0, le=100)
     reason: str = Field(max_length=500)
+    # Routing metadata only: never part of the provider JSON schema or model_dump().
+    _provider_org: str | None = PrivateAttr(default=None)
 
 
 class GrokUnavailable(Exception):

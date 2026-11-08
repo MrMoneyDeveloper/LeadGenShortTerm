@@ -32,12 +32,12 @@ def test_normalize_transaction_rolls_back_then_restarts(postgres, monkeypatch):
     original = pipeline.score
     calls = 0
 
-    def interrupt(text, source, published_at):
+    def interrupt(text, source, published_at, matched=None):
         nonlocal calls
         calls += 1
         if calls == 2:
             raise RuntimeError("controlled interruption")
-        return original(text, source, published_at)
+        return original(text, source, published_at, matched)
 
     monkeypatch.setattr(pipeline, "score", interrupt)
     with pytest.raises(RuntimeError, match="controlled interruption"):

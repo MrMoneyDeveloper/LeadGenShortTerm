@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import AliasChoices, Field, SecretStr, model_validator
+from pydantic import AliasChoices, BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -73,6 +73,42 @@ class Settings(BaseSettings):
     groq_daily_token_soft_cap: int = Field(150_000, ge=0)
     groq_input_usd_per_million: float = Field(0, ge=0)
     groq_output_usd_per_million: float = Field(0, ge=0)
+    # Two independent Free-tier organizations. Each has its own persisted quota state; the
+    # GROQ_*_SOFT_CAP values apply per organization. Without org keys, GROQ_API_KEY acts as org A.
+    groq_org_a_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias=AliasChoices("GROQ_ORG_A_API_KEY", "GROQ_API_KEY1", "groq_org_a_api_key")
+    )
+    groq_org_b_api_key: SecretStr = Field(
+        default=SecretStr(""), validation_alias=AliasChoices("GROQ_ORG_B_API_KEY", "GROQ_API_KEY2", "groq_org_b_api_key")
+    )
+    groq_org_a_enabled: bool = True
+    groq_org_b_enabled: bool = True
+    groq_org_a_rpm_limit: int | None = Field(None, ge=1)
+    groq_org_a_rpd_limit: int | None = Field(None, ge=1)
+    groq_org_a_tpm_limit: int | None = Field(None, ge=1)
+    groq_org_a_tpd_limit: int | None = Field(None, ge=1)
+    groq_org_b_rpm_limit: int | None = Field(None, ge=1)
+    groq_org_b_rpd_limit: int | None = Field(None, ge=1)
+    groq_org_b_tpm_limit: int | None = Field(None, ge=1)
+    groq_org_b_tpd_limit: int | None = Field(None, ge=1)
+
+    # Optional stateless remote workers (Vercel/Netlify). Render remains authoritative and falls
+    # back to local execution whenever a worker is disabled, failing, cooling down or over budget.
+    remote_workers_enabled: bool = False
+    vercel_enabled: bool = False
+    vercel_base_url: str = ""
+    vercel_shared_secret: SecretStr = SecretStr("")
+    vercel_daily_call_cap: int = Field(2000, ge=0)
+    netlify_enabled: bool = False
+    netlify_base_url: str = ""
+    netlify_shared_secret: SecretStr = SecretStr("")
+    netlify_daily_call_cap: int = Field(300, ge=0)
+    remote_worker_timeout_seconds: float = Field(8, ge=1, le=30)
+    remote_worker_max_items: int = Field(50, ge=1, le=200)
+    remote_worker_cooldown_seconds: int = Field(900, ge=30, le=86400)
+    remote_worker_failure_threshold: int = Field(3, ge=1, le=20)
+    # Fraction of remote results recomputed locally; any mismatch opens that worker's circuit.
+    remote_worker_verify_rate: float = Field(1.0, ge=0, le=1)
     semantic_max_attempts: int = Field(2, ge=1, le=3)
     semantic_timeout_seconds: int = Field(20, ge=5, le=60)
 
@@ -119,7 +155,41 @@ class Settings(BaseSettings):
             raise ValueError("Database low water must be below high water")
         if self.campaign_deadline and self.campaign_deadline.tzinfo is None:
             raise ValueError("CAMPAIGN_DEADLINE must include a timezone")
+        for name in ("vercel", "netlify"):
+            url, secret = getattr(self, name + "_base_url"), getattr(self, name + "_shared_secret").get_secret_value()
+            if url and not url.startswith("https://"):
+                raise ValueError(f"{name.upper()}_BASE_URL must use https")
+            if secret and len(secret) < 32:
+                raise ValueError(f"{name.upper()}_SHARED_SECRET must be at least 32 characters")
         return self
+
+    def groq_orgs(self):
+        """Configured, enabled GroqCloud organizations in stable order; never exposes keys in repr."""
+        orgs = []
+        primary = self.groq_org_a_api_key.get_secret_value() or self.groq_api_key.get_secret_value()
+        for name, key in (("a", primary), ("b", self.groq_org_b_api_key.get_secret_value())):
+            if not key or not getattr(self, f"groq_org_{name}_enabled"):
+                continue
+            if name == "b" and key == primary:
+                continue  # One organization configured twice must not double its allowance.
+            orgs.append(GroqOrg(
+                name=name, provider="groq_" + name, api_key=SecretStr(key),
+                rpm_limit=getattr(self, f"groq_org_{name}_rpm_limit") or self.groq_rpm_limit,
+                rpd_limit=getattr(self, f"groq_org_{name}_rpd_limit") or self.groq_rpd_limit,
+                tpm_limit=getattr(self, f"groq_org_{name}_tpm_limit") or self.groq_tpm_limit,
+                tpd_limit=getattr(self, f"groq_org_{name}_tpd_limit") or self.groq_tpd_limit,
+            ))
+        return orgs
+
+
+class GroqOrg(BaseModel):
+    name: str
+    provider: str
+    api_key: SecretStr
+    rpm_limit: int
+    rpd_limit: int
+    tpm_limit: int
+    tpd_limit: int
 
 
 @lru_cache
