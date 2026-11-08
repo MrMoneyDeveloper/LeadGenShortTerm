@@ -4,10 +4,11 @@ LeadGenShortTerm collects bounded public source records, reduces them with deter
 optional local ML, validates public contact data, selectively uses GroqCloud for high-value semantic
 ambiguity, and delivers only final usable leads into sharded Google Sheets with verified Drive copies.
 
-**Phase 2 is still controlled testing. No seven-day production campaign, outbound email, MWEB sender,
-or production schedule is authorized by this repository state.** See
-[`docs/PHASE_2_TEST_REPORT.md`](docs/PHASE_2_TEST_REPORT.md); that report must be regenerated after the
-current post-report architecture changes complete their live gates.
+**Phase 2 controlled validation is recorded as complete in the
+[current report](docs/PHASE_2_TEST_REPORT.md). Phase 3 requires explicit approval.**
+No seven-day production campaign, outbound email, MWEB sender or production schedule is authorized.
+The [branch consolidation record](docs/BRANCH_CONSOLIDATION.md) explains how the development branches
+were reconciled into `main` and records the local regression results separately from live evidence.
 
 ```text
 Bluesky / YouTube source adapters

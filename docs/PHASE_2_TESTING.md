@@ -1,12 +1,14 @@
 # Phase 2 — controlled testing procedure
 
-Do not skip directly to the seven-day run. Controlled validation continued on 2026-10-05;
-results and remaining gates are recorded in [PHASE_2_TEST_REPORT.md](PHASE_2_TEST_REPORT.md).
+Do not skip directly to the seven-day run. The completed controlled-validation evidence is recorded
+in [PHASE_2_TEST_REPORT.md](PHASE_2_TEST_REPORT.md). This procedure remains the regression/revalidation
+runbook; a branch merge alone does not authorize repeating live tests or activating schedules.
 
 ## 1. Prepare isolated configuration
 
 Use a disposable PostgreSQL database, a test Sheet and a test Drive subfolder. Do not use the
-operational database for schema tests. Rotate previously exposed legacy credentials. Keep every
+operational database for schema tests. Follow the runtime contract and current credential-rotation
+decision in the test report; do not rotate repeatedly during debugging. Keep every
 scheduler off. Set actual process DATABASE_URL to the disposable DB so it overrides local `.env`.
 Use separate read/operator test tokens, each at least 32 characters.
 
@@ -85,7 +87,8 @@ transient failures. Verify domain validation is never labelled mailbox confirmat
 
 Upload repository Apps Script code to the test project, set test origin/IDs/tokens, authorize scopes,
 and leave trigger flags false. Manually refresh the Sheet. Check all six tabs, safe string handling,
-sample bounds, absence of raw rows, and failure visibility when Render is unavailable.
+dashboard bounds, preservation of final `VALIDATED_###` shards, absence of raw rows, and failure
+visibility when Render is unavailable. Google Sheets is the final dataset, not a sample export.
 
 Run dailyBackup against tiny validated fixtures; inspect CSV, sidecar checksum, stats, summary,
 manifest and EXPORT_HISTORY. Run it twice and confirm no duplicate daily files. Force an interruption

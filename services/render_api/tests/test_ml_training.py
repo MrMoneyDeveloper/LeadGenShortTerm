@@ -47,7 +47,9 @@ def test_train_hash_pin_and_load_local_classifier(tmp_path, isolated_settings):
         check=False,
         capture_output=True,
         text=True,
-        timeout=60,
+        # Cold SciPy DLL imports can exceed a minute on memory-constrained Windows.
+        # Keep the CLI bounded without mistaking startup paging for a training failure.
+        timeout=180 if sys.platform == "win32" else 60,
     )
     assert completed.returncode == 0, completed.stderr
     metrics = json.loads(report.read_text(encoding="utf-8"))

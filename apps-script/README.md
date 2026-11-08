@@ -108,7 +108,7 @@ with the current lead fields are comfortably smaller than that limit. A later ca
 provision a new configured workbook before the full workbook limit is approached; changing a
 campaign ID alone must not reset placements in an existing workbook.
 
-## Local evidence and remaining live gate
+## Local checks and live evidence
 
 `node tests/apps_script_harness.cjs` executes the actual functions against offline Sheets,
 Drive, properties and Render mocks. It covers checksum/literal preservation, shard rollover,
@@ -117,6 +117,6 @@ and daily export, paginated CSVs and manifest/history recovery. The Python suite
 harness.
 
 Offline checks do not prove Google authorization, quotas, latency, trigger scheduling or Apps Script
-runtime behavior. The controlled Phase-2 integration gate must still execute delivery and backup
-against the isolated test Sheet/folder, verify final rows/files and server deletion after ACK, then
-prove the bounded `deliveryTick` can run independently with the local development machine stopped.
+runtime behavior. The completed live delivery, backup, shard rollover and independent cloud-scheduling
+evidence is in the [current Phase-2 report](../docs/PHASE_2_TEST_REPORT.md). A code merge does not
+repeat those live tests or authorize new triggers. Phase 3 still requires explicit approval.

@@ -1,5 +1,8 @@
 # Phase-1 build report — 2026-09-13
 
+> Historical build snapshot. For the current architecture and completed runtime evidence, see
+> [Architecture](ARCHITECTURE.md) and [the current Phase-2 report](PHASE_2_TEST_REPORT.md).
+
 Phase 1 is implemented in the repository. Runtime correctness and platform access are **not yet
 verified**: those are Phase-2 work. No production services were deployed, migrations applied,
 sources queried, paid inference performed, Google files changed, triggers installed or email sent.

@@ -1,7 +1,8 @@
 # Architecture — autonomous short-term-insurance data pipeline
 
-This supersedes the Phase-1 sample-dashboard design and historical root architecture. Phase 2 remains
-controlled testing. No production seven-day campaign, outbound email or MWEB sender is authorized yet.
+This supersedes the Phase-1 sample-dashboard design and historical root architecture. The current
+Phase-2 report records completed controlled validation. Phase 3 needs explicit approval; no production
+seven-day campaign, outbound email or MWEB sender is authorized yet.
 
 ## Responsibilities
 
@@ -106,13 +107,11 @@ scheduling. Dashboard and backup triggers remain separate.
 
 ## Semantic provider and free-tier protection
 
-**September 15 implementation update:** migration `0004_provider_rate_state` adds a
-15th application table, `provider_rate_state`, holding provider-wide rolling windows,
-daily reservations, header limits/remaining/reset values and cooldowns. This supersedes
-the daily-only admission description below. Requests reserve conservative prompt plus
-completion tokens before HTTP. Quota waits persist without consuming candidate failure
-attempts. Free-plan reporting distinguishes zero configured Groq cost from historical
-reference list-price arithmetic. See the current configuration reference and test report.
+Migration `0004_provider_rate_state` adds the 15th application table, `provider_rate_state`,
+holding provider-wide rolling windows, daily reservations, header limits/remaining/reset values
+and cooldowns. Requests reserve conservative prompt plus completion tokens before HTTP. Quota
+waits persist without consuming candidate failure attempts. Free-plan reporting distinguishes
+zero configured Groq cost from historical reference list-price arithmetic.
 
 `SEMANTIC_PROVIDER=groq` is the default. GroqCloud and xAI/Grok are separate providers.
 
@@ -124,10 +123,10 @@ GroqCloud uses:
 - `GROQ_DAILY_REQUEST_SOFT_CAP` (default 800)
 - `GROQ_DAILY_TOKEN_SOFT_CAP` (default 150,000)
 
-Every request attempt is reserved persistently before the HTTP call. Returned token usage is then
-accounted. The token soft cap is necessarily based on already-accounted usage, so one admitted request
-may take the total slightly above the threshold. Quota/rate failures leave candidate state durable for
-later attempts instead of stopping collection/validation/export work.
+Every request attempt and its conservative token allowance are reserved persistently before HTTP.
+Admission checks daily and minute request/token windows and the latest provider headers/cooldown.
+Returned input/output tokens are recorded separately. Quota/rate failures preserve candidate priority
+and defer eligibility without consuming failure attempts or stopping other pipeline stages.
 
 Legacy xAI/Grok remains an explicit optional provider through `GROK_ENABLED` + `XAI_*`; it is not the
 default path and must not be confused with GroqCloud.
@@ -136,8 +135,9 @@ default path and must not be confused with GroqCloud.
 
 `0001_phase1` creates the original 13 application tables. `0002_final_delivery` adds profiles, ranks,
 candidate linkage, pressure/destination state and `export_batches`, bringing the application to 14
-tables. `0003_campaign_lifecycle` extends `pipeline_state` with the persistent campaign clock/counters;
-it does not create another table.
+tables. `0003_campaign_lifecycle` extends `pipeline_state` with the persistent campaign clock/counters.
+`0004_provider_rate_state` adds persistent provider limits/cooldowns, bringing the total to 15.
+Current head `0005_semantic_drain_deadline` adds a campaign semantic deadline without another table.
 
 | Table | Purpose / lifecycle |
 |---|---|
@@ -152,7 +152,8 @@ it does not create another table.
 | `email_validation` | Hashed validation cache, bounded retention |
 | `validated_leads` | Final payload awaiting verified delivery ACK |
 | `pipeline_metrics` | Aggregate daily counters |
-| `api_usage` | Provider request reservations/tokens/estimated cost |
+| `api_usage` | Provider usage/tokens and historical reference-price metadata; Free-plan cost is zero |
+| `provider_rate_state` | Persistent request/token reservations, rate windows, provider headers and cooldown |
 | `failed_jobs` | Sanitized failure codes |
 | `export_batches` | Active immutable delivery payload, then compact ACK receipt |
 

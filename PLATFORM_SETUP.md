@@ -16,7 +16,7 @@ credential that will perform it. Stop that integration on a mismatch or missing 
 
 ## Render and PostgreSQL
 
-Use the isolated LeadGenShortTerm test service in the configured configured test
+Use the isolated LeadGenShortTerm test service in the configured test
 workspace. The read-only services/render_api/scripts/phase2_render_preflight.py
 checks the configured workspace and matches the configured runtime origin to a
 service before checking health and a sanitized summary. It never deploys or migrates.
@@ -62,8 +62,9 @@ Cloudflare owns processing. Remove test schedules after recording evidence.
 
 ## Cloudflare
 
-CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must come from .env. The current token
-is missing; no plugin fallback is permitted. Verify identity with that token first.
+CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must come from .env. If either is
+missing or invalid, stop only this integration step; no plugin fallback is permitted.
+Verify identity with that token first.
 The Worker processes no lead payloads. Its source and tests are under
 services/cloudflare_coordinator/.
 
@@ -75,9 +76,11 @@ Prove wake, backpressure inspection and one bounded jobs/tick without another ow
 ## Exit evidence
 
 Run the local regression and migration checks after fixes. Then prove the tiny
-cloud chain and several cycles with the laptop/local processes off. Rotate exposed
-active credentials once after integration debugging, update private/platform values
-and smoke-test replacements. Record actual evidence in docs/PHASE_2_TEST_REPORT.md.
+cloud chain and several cycles with the laptop/local processes off. The current
+report records the completed Phase-2 evidence; do not repeat cloud tests merely for
+a branch merge. Review deferred credential rotation before Phase 3, replace active
+credentials where needed, update private/platform values and smoke-test replacements.
+Record actual evidence in docs/PHASE_2_TEST_REPORT.md.
 
 Phase 3 follows a Phase-2 pass and explicit approval: one small real complete cycle,
 hard caps, isolated data, no outbound email, inspect and stop. Phase 4 is the separately

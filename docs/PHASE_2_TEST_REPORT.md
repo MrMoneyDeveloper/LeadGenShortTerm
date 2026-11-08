@@ -215,6 +215,11 @@ not authorize it and does not guarantee lead yield.
 ## Historical material
 
 The original September 13 report is preserved as
-`docs/PHASE_2_TEST_REPORT_2026-09-13.md`. It describes the older 33-test, 13-table,
+[the September baseline](PHASE_2_TEST_REPORT_2026-09-13.md). It describes the older 33-test, 13-table,
 xAI-era state and its `PHASE_2_STATUS=FAIL` verdict. That file is historical and must
 not be used as the current project status.
+
+The detailed interim October 9 investigation from `paven/phase2-changes` is preserved as
+[the interim report](PHASE_2_TEST_REPORT_INTERIM_2026-10-09.md). Its unfinished-gate statements
+predate the October 11 evidence above. The [branch consolidation record](BRANCH_CONSOLIDATION.md)
+documents the merge and its separate local checks; it does not claim new live verification.

@@ -58,7 +58,7 @@ Google delivery batch remain. This prevents one run from inheriting another run'
 
 ## GroqCloud semantic provider
 
-### September 15 rate-control update
+### Persistent rate control
 
 Migration `0004_provider_rate_state` is required before running the updated client.
 `GROQ_PLAN` defaults to `free`. New limits default to `GROQ_RPM_LIMIT=30`,
@@ -80,9 +80,6 @@ Single-record inference remains the default; batching requires a measured benefi
 Free-plan dashboard usage reports `actual_pipeline_cost=0`; historical list-price
 arithmetic is exposed only as `reference_list_price`. Other platform costs are not included.
 
-The daily token admission description below predates this update: admission now uses
-reserved upper-bound estimates, rather than waiting for actual usage to cross the cap.
-
 GroqCloud is the default semantic provider and is intentionally separate from xAI/Grok.
 
 | Variable | Default / use |
@@ -92,15 +89,15 @@ GroqCloud is the default semantic provider and is intentionally separate from xA
 | `GROQ_API_KEY` | GroqCloud `gsk_...` credential; secret |
 | `GROQ_MODEL` | No implicit model; configure the tested GroqCloud model explicitly |
 | `GROQ_DAILY_REQUEST_SOFT_CAP` | `800`; conservative persisted request/attempt budget |
-| `GROQ_DAILY_TOKEN_SOFT_CAP` | `150000`; stop new Groq requests once accounted daily tokens reach this value |
+| `GROQ_DAILY_TOKEN_SOFT_CAP` | `150000`; cap conservative daily token reservations before sending requests |
 | `GROQ_INPUT_USD_PER_MILLION` / `GROQ_OUTPUT_USD_PER_MILLION` | `0`; optional accounting metadata, not a requirement to use a paid tier |
 | `SEMANTIC_MAX_ATTEMPTS` | `2`; bounded retry count inside one semantic call |
 | `SEMANTIC_TIMEOUT_SECONDS` | `20`; request timeout |
 
 `GROQ_DAILY_CANDIDATE_CAP` remains accepted as a legacy alias for
-`GROQ_DAILY_REQUEST_SOFT_CAP`. The application reserves each request attempt before the HTTP call,
-then records returned input/output tokens. A soft token limit can overshoot by at most one already
-admitted request because exact token use is only known after the response.
+`GROQ_DAILY_REQUEST_SOFT_CAP`. The application reserves each request attempt and its conservative
+prompt/completion allowance before HTTP, then separately records actual returned tokens. Admission
+also honors minute windows, provider headers and persistent cooldowns; counters survive restart.
 
 Legacy xAI/Grok support remains explicit and disabled by default through `GROK_ENABLED`,
 `XAI_API_KEY`, `XAI_MODEL`, `GROK_DAILY_CANDIDATE_CAP`, `GROK_INPUT_USD_PER_MILLION` and
