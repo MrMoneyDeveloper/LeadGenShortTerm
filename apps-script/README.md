@@ -120,3 +120,17 @@ Offline checks do not prove Google authorization, quotas, latency, trigger sched
 runtime behavior. The completed live delivery, backup, shard rollover and independent cloud-scheduling
 evidence is in the [current Phase-2 report](../docs/PHASE_2_TEST_REPORT.md). A code merge does not
 repeat those live tests or authorize new triggers. Phase 3 still requires explicit approval.
+
+## Operator web endpoint (`Ops.gs`)
+
+A web-app deployment (`doPost`, executes as the deploying owner) lets the operator run a fixed
+whitelist of actions headlessly: `status`, `configure` (whitelisted Script Properties only),
+`install_triggers` / `remove_triggers`, `deliver`, `dashboard`, `backup` and `samples` (writes the
+bounded sample store to a `SAMPLES` tab). There is no arbitrary code execution.
+
+- The request body must carry a secret whose SHA-256 equals `OPS_SECRET_SHA256`; the secret
+  itself lives only in the operator's ignored `.env` as `APPS_SCRIPT_API_TOKEN`.
+- `status` reports flag values and hash *matches* for secrets, never property values or lead data.
+- The endpoint refuses all requests after `OPS_EXPIRES_AT`. Delete the web deployment
+  (`clasp delete-deployment <id>`) when it is no longer needed; rotate the secret by changing
+  the embedded hash and redeploying.
