@@ -1,10 +1,10 @@
 bluesky:
-  enabled: false
+  enabled: true
   seconds: 20
   reconnects: 2
   replay_overlap_us: 1000000
 youtube:
-  enabled: false
+  enabled: true
   video_ids: []
   channel_ids: []
   queries: [car insurance South Africa, home insurance South Africa]
