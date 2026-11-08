@@ -5,16 +5,16 @@ Updated: 2026-11-08 · Branch `codex/collection-hardening`
 ```text
 BUILD_AND_TEST_STATUS=PASS
 LOCAL_FAILOVER_STATUS=PASS (disposable PostgreSQL + mocks; launcher verified; not enabled or run live)
-ALPHABETICAL_DELIVERY_STATUS=PASS_OFFLINE (server + Apps Script harness; not yet deployed)
+ALPHABETICAL_DELIVERY_STATUS=PASS (offline suites + live delivery after deployment)
 SOURCE_YIELD_STATUS=BLOCKED (0 real finals; no source yet supplies intent plus a usable email)
-READY_FOR_SMALL_CANARY=NO (infrastructure ready after the deployment steps below; needs a source decision)
+READY_FOR_SMALL_CANARY=NO (infrastructure deployed and verified; needs a source that supplies emails)
 ```
 
 Objective: prepare the system to collect up to 100,000 **distinct, qualified South African
 personal-insurance leads with a usable public email**, delivered to Google Sheets. Raw records,
 no-email prospects, synthetic fixtures and duplicates never count. No sending, SMTP, MWEB,
-forwarding or outreach was built. No acquisition, campaign or schedule was started, and no live
-service was changed in this work.
+forwarding or outreach was built. No acquisition, campaign or schedule was started. The live
+deployment below was run separately at the operator's request.
 
 ## What was built
 
@@ -109,7 +109,29 @@ Coverage includes:
 - The live free database expires 2026-12-08, and its allow list holds one operator IP. The device's
   current public IP must be on that list for failover to work.
 
-## Next controlled run (exact commands; not executed)
+## Live deployment (2026-11-08, operator-approved)
+
+Each step was preceded by a read-only identity check with the `.env` credentials (Render
+workspace and service, database name and allow list, `.clasp.json` script ID).
+
+| Step | Result |
+|---|---|
+| Live database migration | `0006` → `0007_alphabetical_delivery`; `alembic check` clean; existing receipts marked `sequential` |
+| Layout switch | `adopt-layout alphabetical` confirmed against the bound Sheet; legacy cursor (6 rows) preserved |
+| Render | `SHEET_LAYOUT=alphabetical`; deployed `8aa9e9c`; health OK; `/dashboard/shards` bound and configured `alphabetical` |
+| Apps Script | Code pushed; ops web deployment moved to version 2 (same URL, still expires 2026-11-15); triggers and Script Properties unchanged |
+| Live alphabetical delivery | One labelled synthetic record (reserved `.invalid` address) delivered to a newly created `VALIDATED_P_001`, Drive copy verified, ACKNOWLEDGED, payload removed; `SHARD_INDEX` created; legacy `VALIDATED_001` untouched; replay IDLE |
+
+Notes:
+- `VALIDATED_P_001` row 2 and `VALIDATED_001` rows 5–7 are synthetic test rows and can be deleted.
+- Before any campaign starts, `accepted_finals` includes those acknowledged test deliveries. Starting a
+  campaign scopes the count to its own deliveries, so they never count toward the real target.
+- For the failover identity check, set `FAILOVER_EXPECTED_DATABASE` in `.env` to the live database's
+  `current_database()` name.
+
+Remaining steps from the original list: the failover `status` check and the source-yield canary.
+
+## Next controlled run (steps 1–4 below were completed on 2026-11-08)
 
 From `C:\Workspace\LeadGenShortTerm` after merging to `main`:
 
