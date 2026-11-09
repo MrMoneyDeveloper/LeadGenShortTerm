@@ -40,7 +40,7 @@ def rank(result, valid_contact, ml=None):
         route = "REJECT"
     elif not valid_contact:
         route = "CONTACT_REVIEW"
-    elif value >= policy["direct_at"] and product and geography_gate:
+    elif value >= policy["direct_at"] and product and geography_gate and not conflicting(result, cfg):
         route = "DIRECT_FINAL"
     elif value >= policy["semantic_at"]:
         route = "SEMANTIC"
@@ -58,6 +58,14 @@ def rank(result, valid_contact, ml=None):
             "geography_signal": geography_signal,
         },
     }
+
+
+def conflicting(result, cfg):
+    """Conflicting/review-only evidence, or a rules result from an older rules version (scored before
+    the current seller/conflict gates existed), blocks DIRECT_FINAL; semantic review still applies."""
+    version = str(result.get("version", ""))
+    legacy = version.startswith("rules-") and version != cfg["version"]
+    return bool(result.get("conflicting_signals")) or legacy
 
 
 def semantic_qualified(result):

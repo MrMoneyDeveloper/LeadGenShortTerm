@@ -89,6 +89,7 @@ GroqCloud is the default semantic provider and is intentionally separate from xA
 | `GROQ_API_KEY` | GroqCloud `gsk_...` credential; secret |
 | `GROQ_MODEL` | No implicit model; configure the tested GroqCloud model explicitly |
 | `GROQ_DAILY_REQUEST_SOFT_CAP` | `800`; conservative persisted request/attempt budget |
+| `GROQ_CAMPAIGN_REQUEST_CAP` | `0` (off); hard experiment-wide ceiling on Groq HTTP attempts for the current campaign id across both orgs, all days, retries and drain. Persisted in `provider_rate_state` row `groq_campaign`; config can lower but never raise a campaign's stored cap; the used count is never reset |
 | `GROQ_DAILY_TOKEN_SOFT_CAP` | `150000`; cap conservative daily token reservations before sending requests |
 | `GROQ_INPUT_USD_PER_MILLION` / `GROQ_OUTPUT_USD_PER_MILLION` | `0`; optional accounting metadata, not a requirement to use a paid tier |
 | `SEMANTIC_MAX_ATTEMPTS` | `2`; bounded retry count inside one semantic call |

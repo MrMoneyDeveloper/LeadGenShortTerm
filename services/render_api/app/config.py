@@ -92,6 +92,10 @@ class Settings(BaseSettings):
         ),
     )
     groq_daily_token_soft_cap: int = Field(150_000, ge=0)
+    # Hard ceiling on Groq HTTP requests (every attempt, retry and drain call, both orgs) for the
+    # current campaign. Persisted in provider_rate_state; 0 disables. Lowering it applies at once;
+    # raising it never raises a campaign's stored ceiling, and nothing resets its used count.
+    groq_campaign_request_cap: int = Field(0, ge=0, le=100_000)
     groq_input_usd_per_million: float = Field(0, ge=0)
     groq_output_usd_per_million: float = Field(0, ge=0)
     # Two independent Free-tier organizations. Each has its own persisted quota state; the

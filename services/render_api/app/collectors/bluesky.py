@@ -79,7 +79,8 @@ class BlueskySearch:
                 if data is None:  # invalid cursor: move on to the next query
                     state.update(q=state["q"] + 1, page="", pages=0)
                     continue
-                posts = data.get("posts", [])
+                # Never count past the requested limit even if the AppView returns extra posts.
+                posts = data.get("posts", [])[: max(0, limit - result.scanned)]
                 for post in posts:
                     result.scanned += 1
                     try:

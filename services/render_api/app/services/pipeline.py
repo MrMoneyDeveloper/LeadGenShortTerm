@@ -25,7 +25,7 @@ from app.models import (
     SourceRecord,
     now,
 )
-from app.qualification import digest, normalize, score, term_groups
+from app.qualification import digest, match_text, normalize, profile_geography, score, term_groups
 from app.ranking import rank, semantic_qualified
 from app.repositories import claim_hashes, metric
 from app.services import backpressure, campaign, remote_workers, samples
@@ -58,16 +58,30 @@ def collect(job):
         limit = min(limit, max(0, cfg.queue_high_water - pressure["total_work_rows"]))
         if not limit:
             return {"stop_reason": "queue_high_water"}
+        # A running campaign's raw target is a hard ceiling: never request more than remains.
+        remaining = campaign.scan_remaining(db)
+        if remaining is not None:
+            limit = min(limit, remaining)
+            if not limit:
+                return {"stop_reason": "campaign_raw_target"}
         cursor = dict(source.cursor)
     batch = ADAPTERS[job.source]().collect(cursor, limit)
-    # All accepted source rows, hashes, metrics and checkpoint commit together.
+    from app.collectors.base import SourceError
+
+    if batch.scanned > limit:
+        # Adapter contract violation: commit nothing (no rows, cursor or counters) past the limit.
+        raise SourceError("adapter_limit_exceeded")
+    # All accepted source rows, hashes, metrics, campaign scan count and checkpoint commit together.
     with session() as db:
         source = db.get(SourceCursor, job.source)
         if source.cursor != cursor:
             # An unexpected second collector cannot overwrite a newer committed checkpoint.
-            from app.collectors.base import SourceError
-
             raise SourceError("source_cursor_conflict")
+        remaining = campaign.scan_remaining(db)
+        if remaining is not None and batch.scanned > remaining:
+            # Another collection advanced the campaign meanwhile; never exceed the raw target.
+            raise SourceError("campaign_scan_budget_conflict")
+        # The campaign scan counter advances via metric("all", "raw_scanned") below, same transaction.
         accepted = duplicates = 0
         for record in batch.records:
             text = normalize(record.text)
@@ -137,7 +151,7 @@ def normalize_batch(limit):
         # Optional stateless worker lane; anything it does not return is matched locally.
         remote, worker = {}, None
         if records and cfg.remote_workers_enabled:
-            remote, worker = remote_workers.match_batch([(r.id, r.text) for r in records], term_groups())
+            remote, worker = remote_workers.match_batch([(r.id, match_text(r.text)) for r in records], term_groups())
         for record in records:
             result = score(record.text, record.source, record.published_at, remote.get(str(record.id)),
                            profile_text=(record.profile or {}).get("bio") or None)
@@ -175,6 +189,15 @@ def normalize_batch(limit):
                 metric(db, record.source, "identity_duplicates")
                 db.delete(record)
                 continue
+            candidate_profile = dict(record.profile or {})
+            if result.get("geography_evidence") == "profile_bio" and result.get("geography_excerpt"):
+                # Labelled same-author location evidence, kept apart from the intent text. It travels
+                # with the candidate/lead so it reaches Groq and the delivered Google record.
+                candidate_profile["geography"] = {
+                    "provenance": "profile_bio",
+                    "excerpt": result["geography_excerpt"],
+                    "source_url": candidate_profile.get("profile_url") or record.source_url,
+                }
             candidate = Candidate(
                 record_id=record.id,
                 source=record.source,
@@ -182,7 +205,7 @@ def normalize_batch(limit):
                 identity_hash=record.identity_hash,
                 excerpt=grok.redact(record.text),
                 contacts=found_contacts,
-                profile=record.profile,
+                profile=candidate_profile,
                 product_type=result["product_type"],
                 score=result["score"],
                 status="VALIDATE",
@@ -342,6 +365,16 @@ def classify_batch(limit):
             ))
             route = ranked["route"]
             qualified = route == "DIRECT_FINAL"
+            profile_data = candidate.profile or {}
+            if (result.get("geography_evidence") == "profile_bio" and not profile_data.get("geography")
+                    and profile_data.get("bio")):
+                # Candidates normalized before evidence excerpts existed: rebuild it from the stored bio
+                # so it reaches Groq and the delivered record (Lead.profile is copied from here).
+                excerpt = profile_geography(profile_data["bio"])
+                if excerpt:
+                    candidate.profile = {**profile_data, "geography": {
+                        "provenance": "profile_bio", "excerpt": excerpt,
+                        "source_url": profile_data.get("profile_url") or candidate.source_url}}
             if route == "SEMANTIC":
                 if campaign.semantic_expired(db.get(PipelineState, 1), now()):
                     _terminal(candidate, "REVIEW")
@@ -349,7 +382,10 @@ def classify_batch(limit):
                     count += 1
                     continue
                 try:
-                    semantic_result = semantic.classify(candidate.excerpt, candidate.score)
+                    geography = (candidate.profile or {}).get("geography")
+                    semantic_result = semantic.classify(
+                        candidate.excerpt, candidate.score,
+                        **({"geography": geography["excerpt"]} if geography else {}))
                 except semantic.SemanticUnavailable as exc:
                     if exc.retry_at is not None:
                         candidate.available_at = exc.retry_at

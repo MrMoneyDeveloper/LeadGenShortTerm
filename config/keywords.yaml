@@ -363,17 +363,43 @@ signals:
     - any good brokers
     - which broker
   broker:
+    # Mentions of brokers/agents: penalised, but a consumer broker_request may cancel this one.
     - insurance broker
     - insurance brokerage
     - insurance agent
     - financial adviser
     - financial advisor
-    - registered broker
+  seller:
+    # Unambiguous self-identification as a seller. Hard negative; never cancelled by broker_request.
+    - i am a registered broker
+    - i'm a registered broker
     - i sell insurance
     - we sell insurance
     - we offer insurance
     - contact me for insurance
     - contact our brokerage
+    - i am a broker
+    - i'm a broker
+    - im a broker
+    - i am an insurance broker
+    - i'm an insurance broker
+    - i am an insurance agent
+    - i'm an insurance agent
+    - get a quote from me
+    - i can get you a quote
+    - i can help you with insurance
+    - we can help you with insurance
+  solicitation:
+    # Phrasing used by sellers AND by consumers ("can someone dm me for a quote?"). Not penalised,
+    # but review-only: such a record can never route DIRECT_FINAL (scoring.yaml review_only_signals).
+    - our brokerage
+    - registered broker
+    - dm me for a quote
+    - dm for a quote
+    - message me for a quote
+    - inbox me for a quote
+    - whatsapp me for a quote
+    - get a quote for the best
   job:
     - insurance vacancy
     - insurance vacancies

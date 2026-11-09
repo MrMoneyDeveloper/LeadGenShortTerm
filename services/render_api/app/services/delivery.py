@@ -31,6 +31,16 @@ PROSPECTS = "PROSPECTS"
 WORKBOOK_CELL_LIMIT = 10_000_000
 
 
+def source_evidence(excerpt, profile):
+    """Post excerpt plus, when used, the labelled same-author profile location and its URL (<=2000)."""
+    geography = (profile or {}).get("geography")
+    if not geography:
+        return (excerpt or "")[:2000]
+    suffix = (f" || SA location evidence (same author's public profile bio, {geography.get('source_url', '')[:300]}): "
+              f"\"{(geography.get('excerpt') or '')[:200]}\"")
+    return (excerpt or "")[: max(0, 2000 - len(suffix))] + suffix
+
+
 def bucket(email):
     """Alphabetical bucket from the normalized email's first character; digits/other -> OTHER."""
     first = (email or "").strip().casefold()[:1]
@@ -157,7 +167,7 @@ def claim(limit=None):
                 **{key: getattr(lead, key) for key in ("email", "source", "source_url", "email_source_url", "product_type", "score", "validation_status")},
                 **{key: profile.get(key, "") for key in ("display_name", "username", "business_name")},
                 **personalization(profile),
-                "source_evidence": lead.excerpt[:2000],
+                "source_evidence": source_evidence(lead.excerpt, profile),
                 "lead_id": f"{campaign_id}:{lead.id}", "campaign_id": campaign_id,
                 "rank_score": format(lead.rank_score, ".2f"), "created_at": lead.created_at.isoformat(),
             }

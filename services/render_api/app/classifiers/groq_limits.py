@@ -8,12 +8,14 @@ import math
 import re
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.config import settings
 from app.database import session
-from app.models import ProviderRateState, Usage, now
+from app.models import PipelineState, ProviderRateState, Usage, now
+
+CAMPAIGN_BUDGET = "groq_campaign"
 
 
 def seconds(value):
@@ -84,10 +86,48 @@ def admit(state, cfg, tokens, current, units=0, used_tokens=0, org=None):
     return "ok", None
 
 
+def campaign_budget(db, cfg):
+    """Locked experiment-wide request budget for the current campaign, or None when disabled.
+
+    State: ``{campaign_id: {"cap": int, "used": int}}``. The stored cap is fixed when first seen
+    (later configuration can only lower the effective cap) and ``used`` only ever increases. The
+    first use seeds ``used`` conservatively from recorded Groq usage since the campaign start date.
+    """
+    pipeline = db.get(PipelineState, 1)
+    campaign_id = (pipeline.campaign_id if pipeline is not None else None) or cfg.campaign_id
+    row = locked(db, CAMPAIGN_BUDGET)
+    budgets = dict(row.state or {})
+    entry = dict(budgets.get(campaign_id) or {})
+    if entry:
+        # A stored budget is always enforced: removing or zeroing the setting can never lift it;
+        # a positive setting can only lower it.
+        if cfg.groq_campaign_request_cap > 0:
+            entry["cap"] = min(int(entry["cap"]), cfg.groq_campaign_request_cap)
+        return row, budgets, campaign_id, entry
+    if cfg.groq_campaign_request_cap <= 0:
+        return None  # no budget was ever configured for this campaign
+    if not entry:
+        seed = 0
+        if pipeline is not None and pipeline.campaign_started_at is not None:
+            seed = db.scalar(select(func.coalesce(func.sum(Usage.units), 0)).where(
+                Usage.provider.in_(["groq", "groq_a", "groq_b"]),
+                Usage.day >= pipeline.campaign_started_at.date())) or 0
+        entry = {"cap": cfg.groq_campaign_request_cap, "used": int(seed)}
+    return row, budgets, campaign_id, entry
+
+
 def reserve_request(tokens, org=None):
     cfg, current = settings(), now()
     provider = org.provider if org else "groq"
     with session() as db:
+        # Lock order: campaign budget row, then the organization row (record_response takes only the latter).
+        budget = campaign_budget(db, cfg)
+        if budget is not None:
+            budget_row, budgets, campaign_id, entry = budget
+            if entry["used"] >= entry["cap"]:
+                budgets[campaign_id] = {**entry, "refused": entry.get("refused", 0) + 1}
+                budget_row.state = budgets
+                return "campaign_cap", None
         row = locked(db, provider)
         state = dict(row.state)
         db.execute(insert(Usage).values(day=current.date(), provider=provider, units=0,
@@ -97,6 +137,9 @@ def reserve_request(tokens, org=None):
         row.state = state
         if result[0] == "ok":
             usage.units += 1
+            if budget is not None:
+                budgets[campaign_id] = {**entry, "used": entry["used"] + 1}
+                budget_row.state = budgets
         return result
 
 

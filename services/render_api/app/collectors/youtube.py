@@ -117,7 +117,7 @@ class YouTube:
                     if state["comment_page"]:
                         params["pageToken"] = state["comment_page"]
                     data = fetch(client, "commentThreads", params)
-                    for item in data.get("items", []):
+                    for item in data.get("items", [])[: max(0, limit - result.scanned)]:
                         result.scanned += 1
                         try:
                             record = youtube_profile(item["snippet"]["topLevelComment"], video)

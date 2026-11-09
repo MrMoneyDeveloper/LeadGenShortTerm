@@ -1,4 +1,4 @@
-version: rules-v3
+version: rules-v4
 weights:
   quote: 35
   recommendation: 30
@@ -11,6 +11,7 @@ weights:
   south_africa: 15
   insurer: 10
   broker: -60
+  seller: -80
   job: -50
   advertisement: -50
   news: -40
@@ -26,11 +27,14 @@ require_south_africa: true
 # Operator decision 2026-11-08: lead data is wanted even without a published email. Emails that are
 # found are still syntax/MX-validated; leads without one carry validation_status NO_EMAIL.
 require_contact: false
-negative_signals: [broker, job, advertisement, news, non_target]
+negative_signals: [broker, seller, job, advertisement, news, non_target]
 # Personal short-term and long-term products that count as in-scope leads.
 target_products: [MOTOR, HOME, CONTENTS, LIFE, FUNERAL, DISABILITY]
-# A consumer request for a broker cancels the broker-advertising penalty for that record.
+# A consumer request for a broker cancels only the broker-mention penalty for that record (never
+# "seller"), and such conflicting records can never route DIRECT_FINAL.
 negative_overrides: {broker: broker_request}
+# Evidence that may be a seller or a consumer: never DIRECT_FINAL, semantic review decides.
+review_only_signals: [broker_request, solicitation]
 ranking:
   version: ordinal-rank-v2
   # These are configurable operating thresholds, not measured probabilities.

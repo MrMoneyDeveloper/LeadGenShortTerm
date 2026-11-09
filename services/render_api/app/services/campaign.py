@@ -133,6 +133,14 @@ def start(raw_target=None, duration_days=None, final_target=None):
         return payload(state, 0)
 
 
+def scan_remaining(db):
+    """Scans left for a RUNNING campaign with a raw target (row locked); None when unbounded."""
+    state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
+    if state is None or state.campaign_status != "RUNNING" or not state.campaign_raw_target:
+        return None
+    return max(0, int(state.campaign_raw_target) - int(state.campaign_raw_scanned or 0))
+
+
 def record_scan(db, scanned):
     """Advance the campaign raw counter in the same transaction as the source cursor."""
     if scanned <= 0:
