@@ -82,8 +82,21 @@ function installProcessorTrigger() {
   ScriptApp.newTrigger('processorTick').timeBased().everyMinutes(1).create();
 }
 
+/** Outreach drafts only (never sends): every 2 hours, within the Groq free-tier budget. */
+function draftsTick() {
+  if (config_().props.getProperty('DRAFTS_ENABLED') !== 'true') return;
+  draftsRun(1000, 300);
+}
+
+function installDraftsTrigger() {
+  if (config_().props.getProperty('DRAFTS_ENABLED') !== 'true') throw new Error('CONFIG_DRAFTS_DISABLED');
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'draftsTick')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('draftsTick').timeBased().everyHours(2).create();
+}
+
 function removeLeadgenTriggers() {
-  const names = ['processorTick', 'deliveryTick', 'dashboardTick', 'backupTick'];
+  const names = ['processorTick', 'deliveryTick', 'dashboardTick', 'backupTick', 'draftsTick'];
   ScriptApp.getProjectTriggers().filter(t => names.indexOf(t.getHandlerFunction()) >= 0)
     .forEach(t => ScriptApp.deleteTrigger(t));
 }

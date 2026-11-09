@@ -30,6 +30,14 @@ function interestUrl_(leadId) {
   return base + '?i=' + encodeURIComponent(leadId) + '&t=' + interestToken_(leadId);
 }
 
+/** Signed one-click-plus-confirm unsubscribe link (different HMAC domain from interest links). */
+function unsubscribeUrl_(leadId) {
+  if (!INTEREST_LEAD_.test(String(leadId || ''))) throw new Error('INTEREST_LEAD_INVALID');
+  const base = PropertiesService.getScriptProperties().getProperty('INTEREST_BASE_URL') || '';
+  if (!INTEREST_BASE_.test(base)) throw new Error('INTEREST_BASE_URL_INVALID');
+  return base + '?u=1&i=' + encodeURIComponent(leadId) + '&t=' + interestToken_('unsub:' + leadId);
+}
+
 /** Bind the interest web app and give it the same signing secret, authorised by the ops secret. */
 function interestSetup_(baseUrl, opsSecret) {
   if (!INTEREST_BASE_.test(String(baseUrl || ''))) return {status: 'bad_base_url'};

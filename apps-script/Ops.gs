@@ -10,9 +10,10 @@ const OPS_SECRET_SHA256 = '7ff92fb612bf4034f488521d064eeaa4138ac86a9cf9aa18fe173
 const OPS_EXPIRES_AT = '2026-12-05T00:00:00Z';
 const OPS_PROPERTIES = ['RENDER_BASE_URL', 'DASHBOARD_API_TOKEN', 'PROCESSOR_TRIGGER_TOKEN', 'GOOGLE_SPREADSHEET_ID',
   'GOOGLE_DRIVE_BACKUP_FOLDER_ID', 'DELIVERY_ENABLED', 'BACKUPS_ENABLED', 'DASHBOARD_ENABLED',
-  'PROCESSOR_SCHEDULE_ENABLED', 'DELIVERY_EXPIRES_AT', 'SAMPLES_ENABLED'];
+  'PROCESSOR_SCHEDULE_ENABLED', 'DELIVERY_EXPIRES_AT', 'SAMPLES_ENABLED', 'DRAFTS_ENABLED', 'GROQ_ORG_A_API_KEY',
+  'GROQ_ORG_B_API_KEY', 'GROQ_DRAFT_MODELS', 'DRAFT_DAILY_REQUESTS', 'DRAFT_DAILY_TOKENS'];
 const OPS_FLAGS = ['DELIVERY_ENABLED', 'BACKUPS_ENABLED', 'DASHBOARD_ENABLED', 'PROCESSOR_SCHEDULE_ENABLED',
-  'SAMPLES_ENABLED'];
+  'SAMPLES_ENABLED', 'DRAFTS_ENABLED', 'GROQ_DRAFT_MODELS', 'DRAFT_DAILY_REQUESTS', 'DRAFT_DAILY_TOKENS'];
 
 function opsOut_(body) {
   return ContentService.createTextOutput(JSON.stringify(body)).setMimeType(ContentService.MimeType.JSON);
@@ -121,6 +122,7 @@ function doPost(e) {
         if (wanted.indexOf('delivery') >= 0) installDeliveryTrigger();
         if (wanted.indexOf('reporting') >= 0) installReportingTriggers();
         if (wanted.indexOf('processor') >= 0) installProcessorTrigger();
+        if (wanted.indexOf('drafts') >= 0) installDraftsTrigger();
         return opsOut_({status: 'ok', triggers: ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction())});
       }
       case 'remove_triggers':
@@ -154,6 +156,21 @@ function doPost(e) {
         return opsOut_({status: 'ok', url: interestUrl_(String(request.lead_id))});
       case 'interest_count':
         return opsOut_(interestCount_(request.secret));
+      case 'drafts_run':
+        // Outreach drafts (never sends). Counts only in the response.
+        return opsOut_(draftsRun(request.limit, request.seconds));
+      case 'drafts_status':
+        return opsOut_(draftsStatus_());
+      case 'drafts_peek':
+        // Quality check: newest drafts' business name, line, source and status only (no addresses).
+        return opsOut_({status: 'ok', rows: draftsPeek_(Math.min(Number(request.rows) || 10, 50))});
+      case 'drafts_excerpts':
+        // Operator-run drafting: business name + redacted public page text, never email addresses.
+        return opsOut_({status: 'ok', items: draftExcerpts_(request.n)});
+      case 'drafts_redo':
+        return opsOut_(draftsRedo_(request.lead_ids));
+      case 'drafts_import':
+        return opsOut_(draftImport_(request.items, 'operator:claude'));
       case 'contact_roles':
         // Separate CONTACT_ROLES_### entries for delivered business leads; counts only in the response.
         return opsOut_(contactRoles(request.limit, request.seconds));

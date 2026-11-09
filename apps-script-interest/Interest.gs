@@ -2,7 +2,11 @@
  * Standalone "I'm interested" web app (operator decision 2026-11-09). Deliberately a SEPARATE Apps
  * Script project from the delivery/ops project: any HtmlService page exposes google.script.run, which
  * can call every top-level function without a trailing underscore. This project therefore has exactly
- * three public functions: doGet, doPost and recordInterest. Everything else ends in "_".
+ * four public functions: doGet, doPost, recordInterest and recordUnsubscribe. Everything else ends in "_".
+ *
+ * Unsubscribe links use  ?u=1&i=<lead_id>&t=<token>  with token = HMAC("unsub:" + lead_id), so an
+ * interest link can never be replayed as an unsubscribe link or the other way round. Unsubscribes are
+ * written to the UNSUBSCRIBE tab, which the draft service reads as its suppression list.
  *
  * Link:  <this web app URL>?i=<lead_id>&t=<token>, token = HMAC-SHA256(lead_id, INTEREST_SECRET), 32 hex.
  * The delivery project generates links with the same secret (copied here once by its interest_setup
@@ -14,8 +18,13 @@
  * This project's script lock is its own, so it can never delay lead delivery.
  */
 const OPS_SECRET_SHA256_ = '7ff92fb612bf4034f488521d064eeaa4138ac86a9cf9aa18fe1731544e52a41b';
-const TAB_ = 'INTEREST';
-const FIELDS_ = ['lead_id', 'business_name', 'email', 'website', 'confirmed_at', 'status'];
+const KINDS_ = {
+  interest: {tab: 'INTEREST', prefix: '', fields: ['lead_id', 'business_name', 'email', 'website', 'confirmed_at', 'status'],
+    status: 'interested'},
+  unsubscribe: {tab: 'UNSUBSCRIBE', prefix: 'unsub:',
+    fields: ['lead_id', 'business_name', 'email', 'website', 'unsubscribed_at', 'status'], status: 'unsubscribed'},
+};
+const TAB_ = KINDS_.interest.tab;
 const LEAD_ = /^[A-Za-z0-9_-]{1,64}:\d{1,18}$/;
 const TOKEN_ = /^[a-f0-9]{32}$/;
 const VALIDATED_ = /^VALIDATED_(?:(?:[A-Z]|OTHER)_)?\d{3,}$/;
@@ -34,17 +43,17 @@ function book_() {
   return SpreadsheetApp.openById(id);
 }
 
-function token_(leadId) {
+function token_(leadId, prefix) {
   const secret = props_().getProperty('INTEREST_SECRET');
   if (!secret) throw new Error('INTEREST_SECRET_MISSING');
-  return hex_(Utilities.computeHmacSha256Signature(leadId, secret)).slice(0, 32);
+  return hex_(Utilities.computeHmacSha256Signature((prefix || '') + leadId, secret)).slice(0, 32);
 }
 
-function valid_(leadId, token) {
+function valid_(leadId, token, prefix) {
   if (typeof leadId !== 'string' || typeof token !== 'string') return false;
   if (!LEAD_.test(leadId) || !TOKEN_.test(token)) return false;
   let expected;
-  try { expected = token_(leadId); } catch (e) { return false; }
+  try { expected = token_(leadId, prefix); } catch (e) { return false; }
   let diff = 0;  // constant-time comparison
   for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ token.charCodeAt(i);
   return diff === 0;
@@ -81,36 +90,44 @@ function lookup_(book, leadId) {
   return null;
 }
 
-function tab_(book) {
-  let tab = book.getSheetByName(TAB_);
+function tab_(book, kind) {
+  const spec = KINDS_[kind];
+  let tab = book.getSheetByName(spec.tab);
   if (!tab) {
-    tab = book.insertSheet(TAB_);
-    const head = tab.getRange(1, 1, 1, FIELDS_.length);
+    tab = book.insertSheet(spec.tab);
+    const head = tab.getRange(1, 1, 1, spec.fields.length);
     head.setNumberFormat('@');
-    head.setValues([FIELDS_]);
+    head.setValues([spec.fields]);
     tab.setFrozenRows(1);
   }
   return tab;
 }
 
 /** Called by the confirmation page button. Returns only a status word. */
-function recordInterest(leadId, token) {
-  if (!valid_(leadId, token)) return 'invalid';
+function recordInterest(leadId, token) { return record_('interest', leadId, token); }
+
+/** Called by the unsubscribe page button. Returns only a status word. */
+function recordUnsubscribe(leadId, token) { return record_('unsubscribe', leadId, token); }
+
+function record_(kind, leadId, token) {
+  const spec = KINDS_[kind];
+  if (!valid_(leadId, token, spec.prefix)) return 'invalid';
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) return 'busy';
   try {
     const book = book_();
-    const tab = tab_(book);
+    const tab = tab_(book, kind);
     const last = tab.getLastRow();
     if (last >= 2 && tab.getRange(2, 1, last - 1, 1).getDisplayValues().some(r => r[0] === leadId)) return 'recorded';
     const lead = lookup_(book, leadId) || {business_name: '', email: '', website: ''};
     const row = {lead_id: leadId, business_name: lead.business_name, email: lead.email, website: lead.website,
-      confirmed_at: new Date().toISOString(), status: lead.email ? 'interested' : 'interested_lead_not_found'};
+      status: lead.email ? spec.status : spec.status + '_lead_not_found'};
+    row[spec.fields[4]] = new Date().toISOString();
     const at = Math.max(2, last + 1);
     if (tab.getMaxRows() < at) tab.insertRowsAfter(tab.getMaxRows(), at - tab.getMaxRows());
-    const target = tab.getRange(at, 1, 1, FIELDS_.length);
+    const target = tab.getRange(at, 1, 1, spec.fields.length);
     target.setNumberFormat('@');  // plain text: Sheets must not reinterpret ids or timestamps
-    target.setValues([FIELDS_.map(f => cell_(row[f]))]);
+    target.setValues([spec.fields.map(f => cell_(row[f]))]);
     return 'recorded';
   } catch (e) {
     return 'error';
@@ -119,19 +136,28 @@ function recordInterest(leadId, token) {
   }
 }
 
-function page_(valid, leadId, token) {
+const PAGES_ = {
+  interest: {ask: '<h1>Would you like someone to contact you?</h1><p>Press the button and a person will be in touch within one working day to find a time that suits you.</p>',
+    button: 'Yes, contact me', done: '<div class="tick" aria-hidden="true">&#10003;</div><h1>Got it. We\\\'ll be in touch.</h1><p>Thanks for letting us know. Someone will contact you within one working day.</p><p>You can close this page.</p>',
+    call: 'recordInterest'},
+  unsubscribe: {ask: '<h1>Stop emails from us?</h1><p>Press the button and this address will not receive any more emails from us.</p>',
+    button: 'Unsubscribe', done: '<div class="tick" aria-hidden="true">&#10003;</div><h1>You\\\'re unsubscribed.</h1><p>This address will not receive any more emails from us. You can close this page.</p>',
+    call: 'recordUnsubscribe'},
+};
+
+function page_(valid, leadId, token, kind) {
+  const spec = PAGES_[kind || 'interest'];
   const data = JSON.stringify({i: valid ? leadId : '', t: valid ? token : ''}).replace(/</g, '\\u003c');
   const body = valid
-    ? '<h1>Would you like someone to contact you?</h1><p>Press the button and a person will be in touch within one working day to find a time that suits you.</p>' +
-      '<button id="go" type="button">Yes, contact me</button><p id="msg" class="small" role="status"></p>'
-    : '<h1>This link isn\'t valid.</h1><p>It may be incomplete. If you\'d still like to hear from us, simply reply to the email you received.</p>';
+    ? spec.ask + '<button id="go" type="button">' + spec.button + '</button><p id="msg" class="small" role="status"></p>'
+    : '<h1>This link isn\'t valid.</h1><p>It may be incomplete. You can simply reply to the email you received instead.</p>';
   const script = valid ? '<script>const D=' + data + ';const b=document.getElementById("go"),m=document.getElementById("msg");' +
     'b.addEventListener("click",function(){b.disabled=true;m.textContent="One moment...";' +
     'google.script.run.withSuccessHandler(function(r){if(r==="recorded"){document.getElementById("main").innerHTML=' +
-    '\'<div class="tick" aria-hidden="true">&#10003;</div><h1>Got it. We\\\'ll be in touch.</h1><p>Thanks for letting us know. Someone will contact you within one working day.</p><p>You can close this page.</p>\';}' +
+    "'" + spec.done + "';}" +
     'else{b.disabled=false;m.textContent=r==="busy"?"Busy right now, please press again.":"That did not work. Please reply to the email instead.";}})' +
     '.withFailureHandler(function(){b.disabled=false;m.textContent="That did not work. Please press again or reply to the email.";})' +
-    '.recordInterest(D.i,D.t);});</script>' : '';
+    '.' + spec.call + '(D.i,D.t);});</script>' : '';
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Business cover</title><style>' +
     'body{margin:0;background:#0f2436;color:#e6eff4;font-family:Arial,Helvetica,sans-serif}' +
     '.wrap{max-width:520px;margin:0 auto;padding:64px 22px}' +
@@ -148,7 +174,8 @@ function page_(valid, leadId, token) {
 /** Public GET: shows the confirmation step for a valid link; never records anything by itself. */
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  return page_(valid_(p.i, p.t), p.i, p.t);
+  const kind = p.u === '1' ? 'unsubscribe' : 'interest';
+  return page_(valid_(p.i, p.t, KINDS_[kind].prefix), p.i, p.t, kind);
 }
 
 function out_(body) {
@@ -174,8 +201,9 @@ function doPost(e) {
       return out_({status: 'ok'});
     }
     if (request.action === 'count') {
-      const tab = book_().getSheetByName(TAB_);
-      return out_({status: 'ok', interested: tab ? Math.max(0, tab.getLastRow() - 1) : 0});
+      const book = book_();
+      const rows = name => { const tab = book.getSheetByName(name); return tab ? Math.max(0, tab.getLastRow() - 1) : 0; };
+      return out_({status: 'ok', interested: rows(KINDS_.interest.tab), unsubscribed: rows(KINDS_.unsubscribe.tab)});
     }
     return out_({status: 'unknown_action'});
   } catch (err) {

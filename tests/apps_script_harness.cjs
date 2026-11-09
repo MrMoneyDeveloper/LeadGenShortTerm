@@ -82,7 +82,7 @@ function environment(batch = fixture()) {
       computeDigest: (_algorithm, text) => Array.from(crypto.createHash('sha256').update(text, 'utf8').digest()).map(x => x > 127 ? x - 256 : x),
       newBlob: (content, mime, name) => ({content, mime, name}), formatDate: () => '2026-09-13', sleep: () => {}}
   });
-  for (const name of ['Code.gs', 'Backups.gs', 'Dashboard.gs', 'Delivery.gs', 'Roles.gs', 'InterestLinks.gs']) {
+  for (const name of ['Code.gs', 'Backups.gs', 'Dashboard.gs', 'Delivery.gs', 'Roles.gs', 'InterestLinks.gs', 'Drafts.gs', 'Controls.gs']) {
     vm.runInContext(fs.readFileSync('apps-script/' + name, 'utf8'), context, {filename: name});
   }
   context.api_ = (path, method, body, operator) => {
@@ -508,10 +508,195 @@ test('interest: forged, tampered, non-string or malformed input is refused and r
   assert.equal(rotate.status, 'secret_already_set');  // a configured secret is never silently replaced
 });
 
-test('interest: only doGet, doPost and recordInterest are public in the interest project', () => {
+test('interest: only doGet, doPost, recordInterest and recordUnsubscribe are public in the interest project', () => {
   const source = fs.readFileSync('apps-script-interest/Interest.gs', 'utf8');
   const publicFns = [...source.matchAll(/^function\s+([A-Za-z0-9_$]+)\s*\(/gm)].map(m => m[1]).filter(n => !n.endsWith('_'));
-  assert.deepEqual(publicFns.sort(), ['doGet', 'doPost', 'recordInterest']);
+  assert.deepEqual(publicFns.sort(), ['doGet', 'doPost', 'recordInterest', 'recordUnsubscribe']);
+});
+
+test('unsubscribe: separate signed link, two steps, one row; interest and unsubscribe tokens never interchange', () => {
+  const {e, ctx} = interestEnv();
+  const unsub = e.context.unsubscribeUrl_('cc:7');
+  const m = /\?u=1&i=cc%3A7&t=([a-f0-9]{32})$/.exec(unsub);
+  assert.ok(m, unsub);
+  const utoken = m[1];
+  const itoken = /t=([a-f0-9]{32})$/.exec(e.context.interestUrl_('cc:7'))[1];
+  assert.notEqual(utoken, itoken);
+  const page = ctx.doGet({parameter: {u: '1', i: 'cc:7', t: utoken}}).html;
+  assert.ok(page.includes('Stop emails from us?') && page.includes('recordUnsubscribe'));
+  assert.equal(e.sheets.get('UNSUBSCRIBE'), undefined);
+  assert.ok(ctx.doGet({parameter: {u: '1', i: 'cc:7', t: itoken}}).html.includes("This link isn"));
+  assert.ok(ctx.doGet({parameter: {i: 'cc:7', t: utoken}}).html.includes("This link isn"));
+  assert.equal(ctx.recordUnsubscribe('cc:7', itoken), 'invalid');
+  assert.equal(ctx.recordInterest('cc:7', utoken), 'invalid');
+  assert.equal(ctx.recordUnsubscribe('cc:7', utoken), 'recorded');
+  assert.equal(ctx.recordUnsubscribe('cc:7', utoken), 'recorded');
+  assert.equal(e.sheets.get('UNSUBSCRIBE').getLastRow(), 2);
+  const row = Object.fromEntries(e.sheets.get('UNSUBSCRIBE').values[0].map((h, i) => [h, e.sheets.get('UNSUBSCRIBE').values[1][i]]));
+  assert.equal(row.email, 'info@acme.co.za'); assert.equal(row.status, 'unsubscribed'); assert.ok(row.unsubscribed_at);
+  assert.equal(e.sheets.get('INTEREST'), undefined);
+  const count = JSON.parse(ctx.doPost({postData: {contents: JSON.stringify({action: 'count', auth: OPS_SECRET})}}).text);
+  assert.equal(count.unsubscribed, 1); assert.equal(count.interested, 0);
+});
+
+function draftsEnv(pagesByUrl, groq) {
+  const env = interestEnv();
+  const {e} = env;
+  const roles = e.tab('CONTACT_ROLES_001');
+  roles.values.push(['lead_id', 'business_name', 'website', 'delivered_email', 'delivered_role', 'best_email', 'best_role',
+    'other_mailboxes', 'checked_url', 'status', 'checked_at']);
+  [['cc:1', 'Acme Plumbing', 'https://acme.co.za/', 'accounts@acme.co.za', 'info@acme.co.za'],
+    ['cc:2', 'Beta Bakery', 'https://beta.co.za/', 'info@beta.co.za', ''],
+    ['cc:3', 'Gone CC', 'https://gone.co.za/', 'info@gone.co.za', ''],
+    ['cc:4', 'Thin', 'https://thin.co.za/', 'info@thin.co.za', ''],
+    ['cc:5', 'Unsub Ltd', 'https://unsub.co.za/', 'info@unsub.co.za', '']].forEach(([id, n, w, best, other]) =>
+    roles.values.push([id, n, w, best, 'General', best, 'General', other, w, 'checked', 'x']));
+  const un = e.tab('UNSUBSCRIBE');
+  un.values.push(['lead_id', 'business_name', 'email', 'website', 'unsubscribed_at', 'status'], ['cc:5', 'Unsub Ltd', '', '', 'x', 'unsubscribed']);
+  const prompts = [];
+  e.props.set('GROQ_ORG_A_API_KEY', 'key-a'); e.props.set('GROQ_ORG_B_API_KEY', 'key-b');
+  e.context.Utilities.sleep = () => {};
+  e.context.UrlFetchApp = {
+    fetchAll: requests => requests.map(r => {
+      const html = pagesByUrl[r.url];
+      return {getResponseCode: () => (html === undefined ? 404 : 200), getContentText: () => html || ''};
+    }),
+    fetch: (url, options) => {
+      assert.equal(url, 'https://api.groq.com/openai/v1/chat/completions');
+      const body = JSON.parse(options.payload);
+      prompts.push({key: options.headers.Authorization, model: body.model, user: body.messages[1].content});
+      return groq(prompts.length, body, options);
+    },
+  };
+  return Object.assign(env, {prompts});
+}
+
+const PAGE_ACME = '<title>Acme Plumbing | Durban</title><meta name="description" content="Residential and commercial plumbing in Durban, geyser installs, burst pipes and 24-hour call-outs. Call 031 555 1234 or mail info@acme.co.za">' +
+  '<h1>Plumbers you can trust</h1><p>Family business since 1998 serving Durban North and Umhlanga homes and offices with plumbing repairs.</p>';
+const PAGE_BETA = '<title>Beta Bakery</title><meta name="description" content="Fresh bread, cakes and custom wedding cakes baked daily in Pietermaritzburg for shops, cafes and families across the region.">';
+
+function groqOk(line, name) {
+  return () => ({getResponseCode: () => 200, getAllHeaders: () => ({}),
+    getContentText: () => JSON.stringify({usage: {total_tokens: 400}, choices: [{message: {content: JSON.stringify({name, line, confidence: 'high'})}}]})});
+}
+
+test('drafts: hacked pages, unrelated lines and messy titles are handled', () => {
+  const spam = '<title>Social Responsibility | Cranefield College</title><meta name="description" content="IBETSLOT slot gacor easy deposits, big wins and fast withdrawals every day for all players online now">';
+  const {e} = draftsEnv({'https://acme.co.za/': spam}, groqOk('We see IBETSLOT is a slot website offering easy deposits'));
+  e.context.draftsRun(1, 60);
+  const row = e.sheets.get('EMAIL_DRAFTS_001').values[1];
+  assert.equal(row[11], 'NEEDS_MANUAL'); assert.equal(row[13], 'page_looks_compromised');
+  // A line that does not name the business is rejected even when it passes the other rules.
+  assert.equal(e.context.draftCleanLine_('We see a lovely company doing great work in Durban', 'Acme Plumbing'), '');
+  // Short name: the model's pick only if it appears in the page; otherwise the shortest title segment.
+  assert.equal(e.context.draftShortName_('123 Kids', 'Nursery School | Kempton Park | 123 Kids', 'Title: Nursery School | 123 Kids'), '123 Kids');
+  assert.equal(e.context.draftShortName_('Invented Name', 'Nursery School | Kempton Park | 123 Kids', 'Title: x'), '123 Kids');
+  assert.equal(e.context.draftShortName_('', '15cm Projects � Specialist Energy', ''), '15cm Projects');
+  assert.equal(e.context.draftSubject_('123 Kids'), 'A quick one for 123 Kids');
+});
+
+test('drafts: one failing address never marks the rest of its group unavailable', () => {
+  const {e} = draftsEnv({'https://acme.co.za/': PAGE_ACME, 'https://beta.co.za/': PAGE_BETA}, groqOk(''));
+  const fetchAll = e.context.UrlFetchApp.fetchAll;
+  e.context.UrlFetchApp.fetchAll = () => { throw new Error('Address unavailable: https://gone.co.za/'); };
+  e.context.UrlFetchApp.fetch = (url) => {
+    if (url === 'https://gone.co.za/') throw new Error('Address unavailable');
+    return fetchAll([{url}])[0];
+  };
+  const items = e.context.draftExcerpts_(10);
+  const ok = Object.fromEntries(items.map(i => [i.lead_id, i.ok]));
+  assert.deepEqual(JSON.parse(JSON.stringify(ok)), {'cc:1': true, 'cc:2': true, 'cc:3': false, 'cc:4': false});
+});
+
+test('drafts: insurer, broker and FSP pages are never drafted', () => {
+  for (const page of ['<title>Umsizi Wemizi</title><meta name="description" content="Affinity Funeral provides affordable funeral cover to all South Africans with simple plans for every family.">',
+    '<title>Home | Afscot Financial Services</title><meta name="description" content="AFSCOT FINANCIAL SERVICES cc Authorised Financial Services Provider - FSP No. 13625 for all your Short Term Insurance needs and hospitality.">']) {
+    const {e} = draftsEnv({'https://acme.co.za/': page}, groqOk('We see Acme sells things', 'Acme'));
+    e.context.draftsRun(1, 60);
+    const row = e.sheets.get('EMAIL_DRAFTS_001').values[1];
+    assert.equal(row[11], 'NEEDS_MANUAL'); assert.equal(row[13], 'looks_like_insurer_or_broker');
+  }
+  // A plumber that mentions being insured is still drafted.
+  assert.ok(!vm.runInContext('DRAFT_TRADE_', draftsEnv({}, groqOk('')).e.context).test('Fully insured, qualified plumbers in Durban.'));
+});
+
+test('drafts: redo removes non-approved rows so they are drafted again', () => {
+  const {e} = draftsEnv({'https://acme.co.za/': PAGE_ACME}, groqOk('We see Acme Plumbing fixes geysers and burst pipes in Durban', 'Acme Plumbing'));
+  e.context.draftsRun(1, 60);
+  assert.equal(e.sheets.get('EMAIL_DRAFTS_001').getLastRow(), 2);
+  e.sheets.get('EMAIL_DRAFTS_001').deleteRow = function (at) { this.values.splice(at - 1, 1); };
+  assert.equal(e.context.draftsRedo_(['cc:1']).removed, 1);
+  assert.equal(e.context.draftPending_(e.context.sheet_(), 10)[0].lead_id, 'cc:1');
+});
+
+test('drafts: one row per company, Groq sees only name + redacted page text, unsubscribed and done are skipped', () => {
+  const {e, prompts} = draftsEnv({'https://acme.co.za/': PAGE_ACME, 'https://beta.co.za/': PAGE_BETA, 'https://thin.co.za/': '<title>Home</title>'},
+    (n, body) => (body.messages[1].content.includes('Beta')
+      ? groqOk('We see Beta Bakery bakes fresh bread and custom wedding cakes daily in Pietermaritzburg', 'Beta Bakery')
+      : groqOk('We see Acme Plumbing handles residential and commercial plumbing around Durban, including geyser installs and 24-hour call-outs', 'Acme Plumbing'))());
+  const result = e.context.draftsRun(100, 60);
+  assert.equal(result.status, 'ok'); assert.equal(result.more_pending, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.counts)), {written: 4, pending_review: 2, needs_manual: 2, groq_calls: 2});
+  for (const p of prompts) {
+    assert.ok(!/@|031 555|https?:/.test(p.user), p.user);  // no email, phone or URL ever reaches Groq
+  }
+  assert.ok(prompts[0].user.startsWith('Business: Acme Plumbing.') && prompts[0].user.includes('geyser'));
+  const tab = e.sheets.get('EMAIL_DRAFTS_001').values;
+  const rows = Object.fromEntries(tab.slice(1).map(r => [r[0], Object.fromEntries(tab[0].map((h, i) => [h, r[i]]))]));
+  assert.deepEqual(Object.keys(rows).sort(), ['cc:1', 'cc:2', 'cc:3', 'cc:4']);  // cc:5 unsubscribed
+  assert.equal(rows['cc:1'].status, 'PENDING_REVIEW'); assert.equal(rows['cc:1'].to_email, 'accounts@acme.co.za');
+  assert.ok(rows['cc:1'].personal_line.endsWith('call-outs.'));
+  assert.ok(/\?i=cc%3A1&t=[a-f0-9]{32}$/.test(rows['cc:1'].interest_url));
+  assert.ok(/\?u=1&i=cc%3A1&t=[a-f0-9]{32}$/.test(rows['cc:1'].unsubscribe_url));
+  assert.equal(rows['cc:1'].subject, 'A quick one for Acme Plumbing'); assert.equal(rows['cc:1'].approved, '');
+  assert.equal(rows['cc:3'].status, 'NEEDS_MANUAL'); assert.equal(rows['cc:3'].reviewer_notes, 'page_unavailable');
+  assert.equal(rows['cc:4'].reviewer_notes, 'page_too_thin');
+  assert.equal(e.context.draftsRun(100, 60).counts.written, 0);  // rerun never duplicates
+});
+
+test('drafts: lines that break the rules are not used', () => {
+  const bad = ['We provide plumbing in Durban.', 'We see Acme offers great insurance cover.', 'We see Acme, call 031 555 1234.',
+    'We noticed Acme at info@acme.co.za.', ''];
+  for (const line of bad) {
+    const {e} = draftsEnv({'https://acme.co.za/': PAGE_ACME}, groqOk(line));
+    e.context.draftsRun(1, 60);
+    const r = e.sheets.get('EMAIL_DRAFTS_001').values[1];
+    assert.equal(r[11], 'NEEDS_MANUAL', line); assert.equal(r[5], '', line);
+  }
+  const {e} = draftsEnv({}, groqOk(''));
+  assert.equal(e.context.draftCleanLine_('We see Acme does geyser installs – fast', 'Acme'), 'We see Acme does geyser installs - fast.');
+});
+
+test('drafts: 429 parks a lane and moves on; all lanes spent stops without writing the pending company', () => {
+  let calls = 0;
+  const {e, prompts} = draftsEnv({'https://acme.co.za/': PAGE_ACME, 'https://beta.co.za/': PAGE_BETA}, (n, body, options) => {
+    calls++;
+    if (options.headers.Authorization === 'Bearer key-a') {
+      return {getResponseCode: () => 429, getAllHeaders: () => ({'retry-after': '30'}), getContentText: () => '{}'};
+    }
+    return groqOk('We see Beta Bakery bakes fresh bread and custom wedding cakes daily in Pietermaritzburg')();
+  });
+  e.context.draftsRun(100, 60);
+  assert.ok(prompts.some(p => p.key === 'Bearer key-b'));  // org B used once org A was rate-limited
+  const budget = JSON.parse(e.props.get('DRAFT_BUDGET'));
+  assert.ok(budget.lanes['A:openai/gpt-oss-120b'].until > Date.now());
+  // Everything spent: daily caps reached on every lane -> nothing written for the remaining company.
+  const env2 = draftsEnv({'https://acme.co.za/': PAGE_ACME}, groqOk('We see Acme Plumbing fixes pipes in Durban'));
+  env2.e.props.set('DRAFT_DAILY_REQUESTS', '0');
+  const spent = env2.e.context.draftsRun(100, 60);
+  assert.equal(spent.groq_spent_for_today, true); assert.equal(spent.more_pending, true);
+  assert.ok(!env2.e.sheets.get('EMAIL_DRAFTS_001') || env2.e.sheets.get('EMAIL_DRAFTS_001').getLastRow() <= 1 ||
+    !env2.e.sheets.get('EMAIL_DRAFTS_001').values.slice(1).some(r => r[0] === 'cc:1'));
+});
+
+test('drafts: operator batch import uses the same rules and never duplicates', () => {
+  const {e} = draftsEnv({'https://acme.co.za/': PAGE_ACME}, groqOk(''));
+  const items = e.context.draftExcerpts_(10);
+  assert.ok(items.every(i => !JSON.stringify(i).includes('@')));
+  const r = e.context.draftImport_([{lead_id: 'cc:1', line: 'We see Acme Plumbing handles plumbing repairs around Durban North'},
+    {lead_id: 'cc:2', line: 'We provide cakes'}, {lead_id: 'cc:5', line: 'We see Unsub Ltd'}, {lead_id: 'nope:1', line: 'x'}], 'operator:claude');
+  assert.equal(r.written, 2); assert.equal(r.pending_review, 1); assert.equal(r.skipped, 2);
+  assert.equal(e.context.draftImport_([{lead_id: 'cc:1', line: 'We see Acme again'}], 'operator:claude').written, 0);
 });
 
 test('delivery project never serves a web page (google.script.run would expose its functions)', () => {
