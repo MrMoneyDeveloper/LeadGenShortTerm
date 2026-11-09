@@ -139,12 +139,35 @@ def test_title_addresses_and_bare_suffixes_never_leak():
     assert "@" not in record.business_name
 
 
-def test_throttled_page_is_retried_next_batch_never_skipped(source):
-    fake = Fake(throttle=3)  # first page fails all 3 attempts
+class ThrottleOne(Fake):
+    """Answers 503 for the first ``n`` requests of one page (the acme home page)."""
+
+    def __init__(self, n):
+        super().__init__()
+        self.n = n
+
+    def __call__(self, request):
+        if request.url.path.endswith("warc/1.gz") and request.headers["range"].startswith("bytes=0-") and self.n:
+            self.n -= 1
+            return httpx.Response(503)
+        return super().__call__(request)
+
+
+def test_throttled_host_is_queued_and_retried_never_skipped(source):
+    fake = ThrottleOne(3)  # acme fails all 3 attempts in the first batch
     first = source(fake).collect({}, 100)
-    assert first.stop_reason == "page_backoff" and first.cursor["host"] == 0 and not first.records
+    assert [r.identity for r in first.records] == ["delta.co.za", "gamma.org.za"]  # batch kept going
+    assert [e["host"] for e in first.cursor["retry"]] == ["acme.co.za"]
     second = source(fake).collect(first.cursor, 100)
-    assert [r.identity for r in second.records] == ["acme.co.za", "delta.co.za", "gamma.org.za"]
+    assert [r.identity for r in second.records] == ["acme.co.za"] and second.cursor["retry"] == []
+
+
+def test_persistently_throttled_host_is_dropped_after_bounded_tries(source):
+    fake = ThrottleOne(10_000)
+    batch = source(fake).collect({}, 100)
+    for _ in range(commoncrawl.RETRY_TRIES):
+        batch = source(fake).collect(batch.cursor, 100)
+    assert batch.cursor["retry"] == [] and batch.stop_reason in {"retry_exhausted", "discovery_complete"}
 
 
 @pytest.mark.integration

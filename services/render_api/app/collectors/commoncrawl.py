@@ -40,6 +40,13 @@ EMAIL = re.compile(r"(?<![\w.+-])([A-Za-z0-9._%+-]{1,64})@([A-Za-z0-9-]+(?:\.[A-
 TITLE = re.compile(rb"<title[^>]*>(.*?)</title>", re.I | re.S)
 TAGS = re.compile(r"<[^>]+>")
 ANY_AT = re.compile(r"\S*@\S*")  # anything email-like the strict pattern missed
+RETRY_MAX = 300  # throttled hosts queued in the cursor for later batches
+RETRY_TRIES = 6  # batches a throttled host is attempted in before it is dropped
+
+
+def slim(item):
+    """The capture fields a page fetch needs; keeps the cursor small."""
+    return {k: item[k] for k in ("url", "filename", "offset", "length")}
 CONTACT_PATH = re.compile(r"contact|about|kontak|enquir|get-in-touch|reach-us", re.I)
 
 
@@ -242,7 +249,7 @@ class CommonCrawl:
         if state.get("crawl") != crawl:
             state.clear()
             state["crawl"] = crawl
-        if state.get("complete"):
+        if state.get("complete") and not state.get("retry"):
             result.exhausted, result.stop_reason = True, "discovery_complete"
             return result
         deadline = time.monotonic() + max(5, env.job_seconds - 10)
@@ -254,7 +261,38 @@ class CommonCrawl:
             if "za_start" not in state:
                 state["za_start"], state["za_end"] = self._locate_za(client, crawl, self._size(client, crawl))
                 state["offset"], state["host"] = state["za_start"], 0
+            retry = state.setdefault("retry", [])
             with ThreadPoolExecutor(max_workers=workers) as pool:
+                # Hosts throttled in earlier batches go first; each gets RETRY_TRIES attempts in all.
+                # Each queued host is tried at most once per batch: failures go to the back.
+                pending = len(retry)
+                while pending and retry and result.scanned < limit and time.monotonic() < deadline:
+                    group, budget = [], limit - result.scanned
+                    for entry in retry[: min(pending, workers * 2)]:
+                        if len(entry["picks"]) > budget:
+                            break
+                        group.append(entry)
+                        budget -= len(entry["picks"])
+                    if not group:
+                        break
+                    flat = [item for entry in group for item in entry["picks"]]
+                    pages = list(pool.map(lambda item: self._page(client, item), flat))
+                    result.scanned += len(flat)
+                    del retry[: len(group)]
+                    pending -= len(group)
+                    offset = 0
+                    for entry in group:
+                        own = pages[offset: offset + len(entry["picks"])]
+                        offset += len(entry["picks"])
+                        if any(body is None for _item, _stamp, body in own):
+                            if entry["tries"] + 1 < RETRY_TRIES:
+                                retry.append({**entry, "tries": entry["tries"] + 1})
+                            else:
+                                result.stop_reason = "retry_exhausted"  # reported, then dropped
+                            continue
+                        record = self._record(entry["host"], own, cfg)
+                        if record:
+                            result.records.append(record)
                 while result.scanned < limit and time.monotonic() < deadline:
                     if state["offset"] >= state["za_end"]:
                         state["complete"] = True
@@ -297,10 +335,15 @@ class CommonCrawl:
                         for host, picks in group:
                             pages = [fetched[id(item)] for item in picks]
                             if any(body is None for _item, _stamp, body in pages):
-                                # Throttled after retries: resume at this host next batch, never skip it.
-                                state["host"], finished_block = index, False
-                                result.stop_reason = "page_backoff"
-                                break
+                                # Throttled after retries: queue the host for a later batch and move on.
+                                # Only when the queue is full does the batch stop at this host.
+                                if len(retry) >= RETRY_MAX:
+                                    state["host"], finished_block = index, False
+                                    result.stop_reason = "page_backoff"
+                                    break
+                                retry.append({"host": host, "picks": [slim(i) for i in picks], "tries": 1})
+                                index += 1
+                                continue
                             record = self._record(host, pages, cfg)
                             if record:
                                 result.records.append(record)
@@ -313,7 +356,7 @@ class CommonCrawl:
         finally:
             if owned:
                 client.close()
-        if result.stop_reason not in {"discovery_complete", "index_backoff", "page_backoff"}:
+        if result.stop_reason not in {"discovery_complete", "index_backoff", "page_backoff", "retry_exhausted"}:
             result.stop_reason = "batch_limit" if result.scanned >= limit else "time_limit"
         return result
 
