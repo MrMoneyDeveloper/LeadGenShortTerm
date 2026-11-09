@@ -28,6 +28,8 @@ services:
         value: 'false'
       - key: YOUTUBE_ENABLED
         value: 'false'
+      - key: COMMONCRAWL_ENABLED
+        value: 'false'
       - key: GROQ_ENABLED
         value: 'false'
       - key: GROK_ENABLED

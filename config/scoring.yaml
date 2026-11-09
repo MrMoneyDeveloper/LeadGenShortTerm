@@ -16,7 +16,22 @@ weights:
   advertisement: -50
   news: -40
   non_target: -70
-source_weights: {bluesky: 0, youtube: 0}
+source_weights: {bluesky: 0, youtube: 0, commoncrawl: 0}
+# Operator decision 2026-11-09: generic business mailboxes published on South African company
+# websites are a separate lead category (product_type BUSINESS_CONTACT). They need no consumer
+# intent and never use semantic review: a record qualifies directly when its published address is a
+# configured business mailbox on the site's own .za domain and passes syntax/MX validation. Consumer
+# sources are unaffected; only the sources listed here use this path.
+business_contact:
+  sources: [commoncrawl]
+  product_type: BUSINESS_CONTACT
+  max_age_days: 400
+  score: 50
+  rank_score: 5.0  # ordinal placeholder: no intent is measured for this category
+  # Insurers and brokers are competitors, not leads.
+  reject_signals: [broker, seller]
+  reject_terms: [insurance broker, insurance brokers, brokers, brokerage, insurer, insurers,
+                 insurance company, insurance group, assurance, underwriting, underwriters]
 discard_below: 25
 accept_without_llm_above: 85
 local_confidence: 0.85

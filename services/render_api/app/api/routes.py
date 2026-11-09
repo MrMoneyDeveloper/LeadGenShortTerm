@@ -16,7 +16,7 @@ router = APIRouter()
 
 class JobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    source: Literal["bluesky", "youtube"] | None = None
+    source: Literal["bluesky", "youtube", "commoncrawl"] | None = None
     stage: Literal["normalize", "classify", "validate"] = "normalize"
     batch_size: int | None = Field(None, ge=1, le=2000)
 
@@ -176,7 +176,7 @@ def control(action: Literal["pause", "resume"]):
 
 
 @router.post("/admin/sources/{source}/{action}", dependencies=[Depends(operator)])
-def source_control(source: Literal["bluesky", "youtube"], action: Literal["enable", "disable"]):
+def source_control(source: Literal["bluesky", "youtube", "commoncrawl"], action: Literal["enable", "disable"]):
     with session() as db:
         row = db.get(SourceCursor, source)
         row.enabled, row.updated_at = action == "enable", now()
@@ -261,7 +261,7 @@ def export_summary():
 
 class SampleDeleteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    source: Literal["bluesky", "youtube"] | None = None
+    source: Literal["bluesky", "youtube", "commoncrawl"] | None = None
     source_record_id: str | None = Field(None, min_length=1, max_length=400)
     confirm_all: bool = False
 
@@ -269,7 +269,7 @@ class SampleDeleteRequest(BaseModel):
 @router.get("/dashboard/samples", dependencies=[Depends(dashboard)])
 @router.get("/exports/samples.csv", dependencies=[Depends(dashboard)])
 def sample_store(
-    source: Literal["bluesky", "youtube"] | None = None,
+    source: Literal["bluesky", "youtube", "commoncrawl"] | None = None,
     limit: int = Query(200, ge=1, le=1000),
     format: Literal["json", "csv"] = "json",
 ):

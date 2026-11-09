@@ -78,6 +78,9 @@ def score(text, source, published_at, matched=None, profile_text=None):
     """
     text = match_text(text)
     keys, cfg = rules("keywords"), rules("scoring")
+    business = cfg.get("business_contact") or {}
+    if source in business.get("sources", []):
+        return business_score(text, published_at, cfg, business)
     found = set(match_terms(text, term_groups()) if matched is None else matched)
     product = next((p for p in keys["products"] if "product:" + p in found), "UNKNOWN")
     signals = [k for k in keys["signals"] if "signal:" + k in found]
@@ -114,6 +117,31 @@ def score(text, source, published_at, matched=None, profile_text=None):
         "geography_excerpt": geography_excerpt,
         # Overridden negatives mean conflicting evidence: never DIRECT_FINAL (see ranking.rank).
         "conflicting_signals": sorted(conflicting),
+        "version": cfg["version"],
+    }
+
+
+ZA_ADDRESS = re.compile(r"@[a-z0-9.-]+\.za(?![\w.-])")
+
+
+def business_score(text, published_at, cfg, business):
+    """Business-contact category: an explicit published .za business mailbox, never intent."""
+    found = set(match_terms(text, term_groups()))
+    hits = [k for k in business.get("reject_signals", []) if "signal:" + k in found]
+    if any(matches(text, term) for term in business.get("reject_terms", [])):
+        hits.append("insurance_trade")
+    za = bool(ZA_ADDRESS.search(text))
+    age = (now() - published_at).total_seconds() / 86400
+    rejected = bool(hits) or not za or age > business.get("max_age_days", 400) or age < -1
+    return {
+        "score": int(business.get("score", 50)),
+        "product_type": business.get("product_type", "BUSINESS_CONTACT"),
+        "signals": ["business_contact"] + (["south_africa"] if za else []) + hits,
+        "rejected": rejected,
+        "confident": False,
+        "geography_evidence": "email_domain" if za else None,
+        "geography_excerpt": None,
+        "conflicting_signals": [],
         "version": cfg["version"],
     }
 

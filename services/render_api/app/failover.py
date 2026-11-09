@@ -223,9 +223,12 @@ def cycle(cfg, state, client=None, session_factory=None, expected_head=None, sto
     state["cycles"] += 1
     state["last_cycle_at"] = time.time()
     report = {"mode": state["mode"], "assessment": asdict(assessment), "action": "observe", "jobs": []}
+    # Assist mode: with a healthy cloud the device also runs bounded jobs. They go through the same
+    # advisory executor lock and fencing epoch, so device and Render interleave job by job.
+    assisting = state["mode"] == "cloud" and cfg.failover_assist and bool(assessment.cloud_healthy)
     if not assessment.database_ok:
         report["action"] = "paused_database_unavailable"
-    elif state["mode"] == "device":
+    elif state["mode"] == "device" or assisting:
         if not cfg.failover_enabled:
             report["action"] = "observe_only_failover_disabled"
         else:
@@ -237,7 +240,7 @@ def cycle(cfg, state, client=None, session_factory=None, expected_head=None, sto
                 else:
                     report["jobs"] = process(cfg, stop_requested)
                     state["device_jobs_run"] += sum(1 for s in report["jobs"] if s not in {"idle", "busy", "fenced"})
-                    report["action"] = "device_processed"
+                    report["action"] = "assist_processed" if assisting else "device_processed"
             except Exception as exc:  # noqa: BLE001 - pause and retry next cycle; never exit
                 report["action"], report["error"] = "paused_error", type(exc).__name__  # class name only
     return state, report
@@ -275,14 +278,15 @@ def single_instance(path=None):
         handle.close()
 
 
-def run(cfg, max_cycles=None, sleep=time.sleep):
+def run(cfg, max_cycles=None, sleep=time.sleep, until=None, clock=time.time):
+    """Loop until STOP, ``max_cycles`` or the wall-clock ``until`` (epoch seconds) is reached."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     if STOP_FILE.exists():
         STOP_FILE.unlink()  # a stale stop request from a previous session
     with single_instance():
         state = load_state()
         cycles = 0
-        while not STOP_FILE.exists():
+        while not STOP_FILE.exists() and (until is None or clock() < until):
             state, report = safe_cycle(cfg, state, stop_requested=STOP_FILE.exists)
             try:
                 save_state(state)
@@ -293,7 +297,7 @@ def run(cfg, max_cycles=None, sleep=time.sleep):
             if max_cycles is not None and cycles >= max_cycles:
                 break
             for _ in range(cfg.failover_interval_seconds):
-                if STOP_FILE.exists():
+                if STOP_FILE.exists() or (until is not None and clock() >= until):
                     break
                 sleep(1)
         if STOP_FILE.exists():
@@ -304,7 +308,10 @@ def run(cfg, max_cycles=None, sleep=time.sleep):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Explicit-start local-device failover watchdog")
     parser.add_argument("command", choices=["status", "once", "run", "stop"])
+    parser.add_argument("--hours", type=float, help="run: stop by itself after this many hours")
     args = parser.parse_args(argv)
+    if args.hours is not None and not 0 < args.hours <= 72:
+        parser.error("--hours must be between 0 and 72")
     cfg = settings()
     if args.command == "stop":
         STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -323,7 +330,8 @@ def main(argv=None):
         except Exception:  # noqa: BLE001
             evidence, problems = None, ["database_unavailable"]
         print(json.dumps({"saved_state": load_state(), "assessment": asdict(assess(http_ok, evidence, cfg, http_ms)),
-                          "failover_enabled": cfg.failover_enabled, "executor_role": cfg.executor_role,
+                          "failover_enabled": cfg.failover_enabled, "failover_assist": cfg.failover_assist,
+                          "executor_role": cfg.executor_role,
                           "identity_problems": problems}, indent=1, default=str))
         return 0
     if args.command == "once":
@@ -332,7 +340,7 @@ def main(argv=None):
             save_state(state)
             print(json.dumps(report, indent=1, default=str))
         return 0
-    run(cfg)
+    run(cfg, until=None if args.hours is None else time.time() + args.hours * 3600)
     return 0
 
 

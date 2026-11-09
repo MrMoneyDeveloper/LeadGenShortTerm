@@ -133,6 +133,23 @@ def start(raw_target=None, duration_days=None, final_target=None):
         return payload(state, 0)
 
 
+def finish():
+    """Operator stop: a RUNNING campaign stops acquiring and drains (then finalizes) as usual.
+
+    Counters, receipts and delivered data are kept; nothing is reset. Afterwards a new campaign can
+    be started once the work tables are empty.
+    """
+    with session() as db:
+        state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())
+        if state is None:
+            raise CampaignError("pipeline_uninitialized")
+        if state.campaign_status == "RUNNING":
+            current = now()
+            state.campaign_status, state.draining = "DRAINING", True
+            state.campaign_last_progress_at = state.updated_at = current
+        return payload(state, accepted_finals(db, state))
+
+
 def scan_remaining(db):
     """Scans left for a RUNNING campaign with a raw target (row locked); None when unbounded."""
     state = db.scalar(select(PipelineState).where(PipelineState.id == 1).with_for_update())

@@ -25,7 +25,9 @@ def normalize_email(address):
     return validate_email(address.strip(), check_deliverability=False).normalized.casefold()
 
 
-def validate_contact(address, resolver=None):
+def validate_contact(address, resolver=None, allow_role=False):
+    """``allow_role`` is only passed for the business-contact category, where a generic mailbox such
+    as info@ is the published business contact itself."""
     try:
         email = normalize_email(address)
     except EmailNotValidError:
@@ -34,7 +36,7 @@ def validate_contact(address, resolver=None):
     cfg = rules("disposable-domains")
     if any(domain == x or domain.endswith("." + x) for x in cfg["domains"]):
         return "RISKY", "disposable_domain"
-    if local in cfg["role_accounts"]:
+    if local in cfg["role_accounts"] and not allow_role:
         return "RISKY", "role_account"
     resolver = resolver or dns.resolver.Resolver()
     resolver.lifetime = 4

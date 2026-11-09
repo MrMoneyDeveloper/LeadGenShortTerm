@@ -6,7 +6,8 @@ from app import jobs
 
 def main():
     parser = argparse.ArgumentParser(description="Explicit bounded job execution; never called during build")
-    parser.add_argument("command", choices=["tick", "process-next", "adopt-destination", "adopt-layout", "recover", "confirm-empty-destination"])
+    parser.add_argument("command", choices=["tick", "process-next", "adopt-destination", "adopt-layout", "recover", "confirm-empty-destination",
+                                            "finish-campaign"])
     parser.add_argument("--next-position", type=int, help="adopt-destination: existing data rows to skip")
     parser.add_argument("--layout", choices=["sequential", "alphabetical"], help="adopt-layout: target layout")
     parser.add_argument("--confirm-spreadsheet-id", help="adopt-layout: must equal the bound/configured Sheet ID")
@@ -34,6 +35,11 @@ def main():
             print(json.dumps(delivery.adopt_destination(args.next_position)))
         else:
             print(json.dumps(delivery.adopt_layout(args.layout, args.confirm_spreadsheet_id or "")))
+        return
+    if args.command == "finish-campaign":
+        from app.services import campaign
+
+        print(json.dumps(campaign.finish(), default=str))
         return
     if args.command == "tick":
         jobs.schedule_tick()

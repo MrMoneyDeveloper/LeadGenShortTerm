@@ -109,6 +109,7 @@ def summary():
                     "processing_enabled",
                     "bluesky_enabled",
                     "youtube_enabled",
+                    "commoncrawl_enabled",
                     "grok_enabled",
                     "groq_enabled",
                     "final_delivery_enabled",

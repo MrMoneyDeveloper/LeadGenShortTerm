@@ -29,7 +29,7 @@ logger = logging.getLogger("leadgen.jobs")
 def initialize():
     with session() as db:
         db.execute(insert(PipelineState).values(id=1, paused=True).on_conflict_do_nothing())
-        for name in ("bluesky", "youtube"):
+        for name in ("bluesky", "youtube", "commoncrawl"):
             db.execute(insert(SourceCursor).values(source=name, enabled=False, cursor={}).on_conflict_do_nothing())
 
 
@@ -209,6 +209,7 @@ def schedule_tick():
         ("classify", None),
         ("collect", "bluesky"),
         ("collect", "youtube"),
+        ("collect", "commoncrawl"),
     ]:
         # Disabled stages cannot enqueue work. Avoid queue reads and repeated permission
         # checks over the remote database; cleanup and campaign advancement still run.

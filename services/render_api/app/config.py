@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     processing_enabled: bool = False
     bluesky_enabled: bool = False
     youtube_enabled: bool = False
+    commoncrawl_enabled: bool = False
     scheduler_enabled: bool = False
 
     processing_batch_size: int = Field(600, ge=1, le=2000)
@@ -59,6 +60,9 @@ class Settings(BaseSettings):
     render_base_url: str = ""
     # Local-device failover watchdog (explicit start only; processing additionally needs FAILOVER_ENABLED).
     failover_enabled: bool = False
+    # Assist: while the cloud is healthy the device ALSO runs bounded jobs through the same executor
+    # lock (interleaved with Render, never concurrently), instead of only observing.
+    failover_assist: bool = False
     failover_interval_seconds: int = Field(60, ge=15, le=3600)
     failover_failure_threshold: int = Field(3, ge=1, le=20)
     failover_recovery_threshold: int = Field(3, ge=1, le=20)

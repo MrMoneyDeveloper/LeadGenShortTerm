@@ -5,6 +5,9 @@ from app.config import rules
 
 def rank(result, valid_contact, ml=None):
     cfg = rules("scoring")
+    business = cfg.get("business_contact") or {}
+    if business and result.get("product_type") == business.get("product_type"):
+        return business_rank(result, valid_contact, business, cfg)
     policy = cfg["ranking"]
     signals = result.get("signals", [])
     product = result.get("product_type") in set(cfg.get("target_products", ["MOTOR", "HOME", "CONTENTS"]))
@@ -57,6 +60,21 @@ def rank(result, valid_contact, ml=None):
             "geography": geography_gate,
             "geography_signal": geography_signal,
         },
+    }
+
+
+def business_rank(result, valid_contact, business, cfg):
+    """Business contacts: DIRECT_FINAL only with a validated mailbox and .za evidence; never semantic."""
+    geography = "south_africa" in result.get("signals", [])
+    route = "DIRECT_FINAL" if valid_contact and geography and not result.get("rejected") \
+        and not conflicting(result, cfg) else "REJECT"
+    return {
+        "rank_score": float(business.get("rank_score", 5.0)),
+        "route": route,
+        "review_route": False,
+        "version": cfg["ranking"]["version"],
+        "hard_gates": {"contact": bool(valid_contact), "product": True, "geography": geography,
+                       "geography_signal": geography, "business_contact": True},
     }
 
 

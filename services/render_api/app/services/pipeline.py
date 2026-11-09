@@ -240,9 +240,15 @@ def _terminal(candidate, status):
         samples.update(db, candidate.id, status.lower(), {"final_status": status})
 
 
-def contact_required():
-    """Operator policy (config/scoring.yaml require_contact). Default: a usable email is required."""
-    return rules("scoring").get("require_contact", True)
+def is_business(candidate):
+    business = rules("scoring").get("business_contact") or {}
+    return bool(business) and candidate is not None and candidate.product_type == business.get("product_type")
+
+
+def contact_required(candidate=None):
+    """Operator policy (config/scoring.yaml require_contact). Default: a usable email is required.
+    The business-contact category always requires its email: it has no other lead data."""
+    return is_business(candidate) or rules("scoring").get("require_contact", True)
 
 
 def _usable_contacts(candidate):
@@ -278,7 +284,7 @@ def _finalize(db, candidate):
         candidate.status, candidate.contacts = "VALIDATED", []
         samples.update(db, candidate.id, "final", {"final_status": "VALIDATED", "rank_score": candidate.rank_score})
         return True
-    if not candidate.contacts and not contact_required():
+    if not candidate.contacts and not contact_required(candidate):
         # Lead data without an email: provenance is the public post/profile; dedupe is by identity.
         if not claim_hashes(db, ["lead:" + candidate.identity_hash]):
             metric(db, candidate.source, "identity_duplicates")
@@ -315,7 +321,7 @@ def classify_batch(limit):
             )
             if not candidate:
                 break
-            if not _usable_contacts(candidate) and (candidate.contacts or contact_required()):
+            if not _usable_contacts(candidate) and (candidate.contacts or contact_required(candidate)):
                 # Older/retried candidates cannot bypass deterministic contact validation.
                 candidate.status, candidate.available_at = "VALIDATE", now()
                 count += 1
@@ -444,7 +450,7 @@ def validate_batch(limit):
             if not candidate:
                 break
             if not candidate.contacts:
-                if contact_required():
+                if contact_required(candidate):
                     _terminal(candidate, "NO_CONTACT")
                     metric(db, candidate.source, "no_contact")
                 else:
@@ -465,7 +471,11 @@ def validate_batch(limit):
                     duplicate = True
                     continue
                 cached = db.get(EmailValidation, email_hash)
-                if cached and cached.checked_at > now() - timedelta(days=3) and cached.reason != "dns_temporary":
+                if is_business(candidate):
+                    # Business mailboxes (info@, sales@) are validated without the shared cache: a
+                    # role address accepted on this path must never be reused by a consumer source.
+                    status, reason = validate_contact(contact["email"], allow_role=True)
+                elif cached and cached.checked_at > now() - timedelta(days=3) and cached.reason != "dns_temporary":
                     status, reason = cached.status, cached.reason
                 else:
                     status, reason = validate_contact(contact["email"])
@@ -498,7 +508,7 @@ def validate_batch(limit):
                     # This person's email was already accepted/delivered: never re-admit them as a
                     # no-email lead.
                     _reject(db, candidate)
-                elif not contact_required():
+                elif not contact_required(candidate):
                     # Published emails failed validation: keep the lead data, drop the bad contacts.
                     candidate.contacts = []
                     candidate.status, candidate.attempts, candidate.available_at = "CLASSIFY", 0, now()

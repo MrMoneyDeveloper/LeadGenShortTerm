@@ -188,3 +188,43 @@ screened samples) before building any source; report no-email SA intent prospect
 (2) channel and spend for a quote form (ads, referrals); (3) partner/comparison-site feeds with
 consent warranties; (4) optional paid X canary or permission-based forum canary; (5) SA
 privacy/FAIS legal review before any Phase 3 contact.
+
+**Canary stopped (2026-11-09, operator decision).** The targeted Bluesky canary
+`bluesky-canary-20261109` was stopped after about 2 hours by disabling the source: 0 scanned, 0
+stored, 0 Groq requests, 0 finals. Counters, checkpoints and Google data were left untouched. Bluesky
+stays disabled as a lead source.
+
+## Email-source sweep (2026-11-09): where SA emails actually are
+
+Operator definition for this sweep: a lead is an email (intent optional). Six source families were
+probed with real fetches (aggregate counts only, no addresses kept), the surviving candidate was
+adversarially re-checked, and the results were synthesized.
+
+| Source family | Measured | Distinct SA personal emails reachable |
+|---|---|---|
+| Common Crawl `.za` random sample | 47 email strings/1k pages (318 pages), 11% webmail-style; the rest business/university/news | ~10^4-10^5, but sole-trader/business, no insurance intent, and Common Crawl terms 2(g)/2(l) exclude this use |
+| Classifieds (Gumtree, Cars.co.za, AutoTrader, Property24, Private Property, AdsAfrica, ...) | 0 private-seller emails in ~250 listings; contact is form or phone-reveal; Junk Mail/Locanto bot-blocked; OLX closed | ~0 |
+| Forums/reviews (Hellopeter, MyBroadband, 4x4community, Reddit SA, Mastodon, Telegram, Trustpilot, Quora, News24) | Hellopeter 0/140 (contacts redacted); MyBroadband 1/~840; Reddit 2.2 personal/1k (900) | ~500 |
+| Web search APIs (Brave, SERP resellers; Google CSE closed, Bing retired) | 2 seller emails in 71 results; indexes strip "@" | ~1,000 |
+| Public documents, mailing lists, Usenet, open data, GitHub | small, stale, obfuscated or anonymised | ~2,000 |
+| X API (pay-per-use) | not measurable without paying; extrapolated ~0.1/1k posts | ~300/month at ~$15k/month |
+
+**Conclusion.** Every public route together is about 1,000 SA personal emails, almost none with
+insurance context. The only pool in the 10^4-10^5 range (Common Crawl) is business addresses whose
+provider terms exclude the use. Platforms keep contact private (forms, DMs, phone reveal, redaction);
+this is the structural reason the yield is zero, not the filters or the pipeline. Reaching 100,000
+needs a source where the email is submitted to us: inbound lead capture or a partner feed.
+
+## Business-contact source (2026-11-09, operator decision)
+
+The operator redefined the target for this run as 10,000 email leads and accepted business contacts.
+New source `commoncrawl` reads the public Common Crawl index (CC-MAIN-2026-43) by byte range and keeps
+only configured generic business mailboxes (info@, sales@, enquiries@, ...) on a website's own .za
+domain. Addresses naming a person are never collected; Common Crawl's terms of use (2(l)) exclude
+harvesting personal information. Leads carry `product_type: BUSINESS_CONTACT`, the page URL as
+provenance and the page title as business name, never a first name ("Good day,"). They qualify
+directly after syntax/MX validation, without Groq; insurer/broker sites are rejected. Consumer
+sources and their rules are unchanged.
+
+Measured from this PC: about 3 pages/s at 8 concurrent range requests, and about 28% of .za home
+pages publish such a mailbox (about 50 leads per minute of collection).

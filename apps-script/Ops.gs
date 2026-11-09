@@ -63,7 +63,7 @@ function peekLeads_(count) {
   const book = sheet_();
   const tabs = book.getSheets().filter(t => VALIDATED_TAB_.test(t.getName()));
   const totals = tabs.map(t => ({tab: t.getName(), data_rows: Math.max(0, t.getLastRow() - 1)}));
-  const products = ['MOTOR', 'HOME', 'CONTENTS', 'LIFE', 'FUNERAL', 'DISABILITY', 'OTHER', 'UNKNOWN'];
+  const products = ['MOTOR', 'HOME', 'CONTENTS', 'LIFE', 'FUNERAL', 'DISABILITY', 'OTHER', 'UNKNOWN', 'BUSINESS_CONTACT'];
   const rows = [];
   tabs.forEach(tab => {
     const last = tab.getLastRow();

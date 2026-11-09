@@ -64,6 +64,11 @@ def keys_for_values(row):
         if len(seg) == 4 and seg[0] == "profile" and seg[2] == "post" and seg[1].startswith("did:"):
             keys.add("record:" + digest(f"bluesky:{seg[1]}/{seg[3]}"))
             keys.add("lead:" + digest(f"bluesky:{seg[1]}"))
+    elif source == "commoncrawl" and parts.hostname:
+        host = parts.hostname.lower().rstrip(".")
+        host = host[4:] if host.startswith("www.") else host
+        keys.add("record:" + digest(f"commoncrawl:{host}"))
+        keys.add("lead:" + digest(f"commoncrawl:{host}"))
     elif source == "youtube" and parts.hostname in {"www.youtube.com", "youtube.com"}:
         comment = parse_qs(parts.query).get("lc", [""])[0]
         if comment:

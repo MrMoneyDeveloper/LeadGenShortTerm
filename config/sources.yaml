@@ -55,3 +55,36 @@ youtube:
   relevance_language: en
   store_recent_only: true
   require_discovery_match: true
+commoncrawl:
+  # Generic business mailboxes published on South African (.za) websites, read from the public
+  # Common Crawl index on data.commoncrawl.org. Only the local parts below, on the site's own .za
+  # domain, are collected; addresses naming a person are never collected. Changing `crawl`
+  # restarts the cursor for that crawl.
+  enabled: true
+  crawl: CC-MAIN-2026-43
+  concurrency: 8  # measured: 8 -> ~3 pages/s from one machine; 12 triggers more 503 throttling
+  pages_per_host: 1  # home page (or contact page when no home page was captured)
+  max_emails_per_host: 3
+  user_agent: "leadgen-shortterm/1.0 (business contact index; polite, range requests)"
+  business_locals:
+    - info
+    - sales
+    - enquiries
+    - enquiry
+    - enquire
+    - contact
+    - contactus
+    - office
+    - admin
+    - hello
+    - reception
+    - accounts
+    - bookings
+    - reservations
+    - orders
+    - service
+    - support
+    - general
+    - mail
+    - quotes
+    - marketing
