@@ -349,6 +349,48 @@ def test_assist_mode_processes_alongside_a_healthy_cloud(postgres, isolated_sett
         assert report["action"] == "observe" and report["jobs"] == [] and remaining == 1
 
 
+@pytest.mark.integration
+def test_assist_kinds_leave_database_stages_to_the_cloud(postgres, isolated_settings):
+    from app.models import Job, PipelineState
+
+    jobs.initialize()
+    cfg = configure(isolated_settings, True)
+    cfg.failover_assist_kinds = "collect"
+    with postgres() as db:
+        db.get(PipelineState, 1).paused = False
+        db.add(Job(idempotency_key="assist-normalize-2", kind="normalize", source=None, batch_size=10))
+        healthy_cloud(db)
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={})))
+    _state, report = failover.cycle(cfg, failover.default_state(), client=client, session_factory=postgres)
+    assert report["action"] == "assist_processed" and report["jobs"] == ["idle"]
+    with postgres() as db:
+        assert db.query(Job).filter(Job.idempotency_key == "assist-normalize-2").one().status == "QUEUED"
+    assert jobs.run_next()["status"] == "complete"  # the cloud (no kind filter) still runs it
+
+
+def test_scheduler_runs_several_jobs_per_tick_until_idle(isolated_settings, monkeypatch):
+    from contextlib import contextmanager
+
+    isolated_settings.scheduler_jobs_per_tick = 5
+    calls, scheduler = [], jobs.Scheduler()
+
+    @contextmanager
+    def lock(_key):
+        yield True
+
+    def run_next():
+        calls.append(1)
+        if len(calls) == 3:
+            scheduler.stop.set()
+        return {"status": "complete" if len(calls) < 3 else "idle"}
+
+    monkeypatch.setattr(jobs, "advisory_lock", lock)
+    monkeypatch.setattr(jobs, "schedule_tick", lambda: None)
+    monkeypatch.setattr(jobs, "run_next", run_next)
+    scheduler.loop()
+    assert len(calls) == 3
+
+
 def test_timed_run_stops_by_itself(isolated_settings, monkeypatch, tmp_path):
     cfg = configure(isolated_settings, False)
     cfg.failover_interval_seconds = 15

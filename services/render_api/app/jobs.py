@@ -104,9 +104,10 @@ def heartbeat(acquired):
         logger.warning("executor_heartbeat_failed role=%s", role)
 
 
-def run_next():
+def run_next(kinds=None):
     # One bounded executor across all web processes AND the optional device failover watchdog.
     # A killed worker loses the advisory lock; the next executor reclaims RUNNING jobs immediately.
+    # ``kinds`` restricts which queued job kinds this call may pick (None = any).
     with advisory_lock(EXECUTOR_LOCK) as acquired:
         heartbeat(acquired)
         if not acquired:
@@ -114,7 +115,7 @@ def run_next():
         epoch = take_ownership()
         token = FENCE_EPOCH.set(epoch)
         try:
-            return _run_owned()
+            return _run_owned(kinds)
         except StaleExecutor:
             # Another executor took over (our lock connection died). Nothing more is committed.
             logger.warning("executor_fenced epoch=%s", epoch)
@@ -135,7 +136,7 @@ def take_ownership():
         ).scalar()
 
 
-def _run_owned():
+def _run_owned(kinds=None):
     with session() as db:
         for abandoned in db.scalars(select(Job).where(Job.status == "RUNNING")):
             abandoned.status = "QUEUED"
@@ -145,6 +146,8 @@ def _run_owned():
         ).all()
         # Drain/cleanup before new raw input, even when old collect jobs were queued first.
         priority = {"validate": 0, "classify": 1, "normalize": 2, "cleanup": 3, "collect": 4}
+        if kinds:
+            jobs = [j for j in jobs if j.kind in kinds]
         jobs.sort(key=lambda j: (priority.get(j.kind, 9), j.created_at))
         job = next((j for j in jobs if permitted(db, j.kind, j.source)), None)
         if job is None:
@@ -255,7 +258,9 @@ class Scheduler:
                 with advisory_lock(7112002) as leader:
                     if leader:
                         schedule_tick()
-                run_next()
+                for _ in range(settings().scheduler_jobs_per_tick):
+                    if self.stop.is_set() or run_next().get("status") in {"idle", "busy", "fenced"}:
+                        break
             except Exception as exc:
                 # Exception strings can contain credentials or SQL values; log the class only.
                 logger.error("scheduler_error code=%s", type(exc).__name__)

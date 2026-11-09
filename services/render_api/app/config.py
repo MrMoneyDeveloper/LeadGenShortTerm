@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # Assist: while the cloud is healthy the device ALSO runs bounded jobs through the same executor
     # lock (interleaved with Render, never concurrently), instead of only observing.
     failover_assist: bool = False
+    # Comma-separated job kinds the device runs in assist mode (empty = all). For example
+    # "collect": a device far from the database fetches sources; the cloud runs database stages.
+    failover_assist_kinds: str = ""
     failover_interval_seconds: int = Field(60, ge=15, le=3600)
     failover_failure_threshold: int = Field(3, ge=1, le=20)
     failover_recovery_threshold: int = Field(3, ge=1, le=20)
@@ -173,6 +176,8 @@ class Settings(BaseSettings):
     job_max_attempts: int = Field(5, ge=1, le=20)
     job_seconds: int = Field(45, ge=10, le=120)
     scheduler_interval_seconds: int = Field(60, ge=30)
+    # In-process scheduler: bounded jobs run back to back per tick (stops early when idle/busy).
+    scheduler_jobs_per_tick: int = Field(1, ge=1, le=20)
 
     @model_validator(mode="after")
     def validate_secrets(self):

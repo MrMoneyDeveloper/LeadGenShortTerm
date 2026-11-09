@@ -192,7 +192,11 @@ def alembic_head():
     return ScriptDirectory.from_config(Config(str(ROOT / "services" / "render_api" / "alembic.ini"))).get_current_head()
 
 
-def process(cfg, stop_requested=lambda: False):
+def assist_kinds(cfg):
+    return {k.strip() for k in cfg.failover_assist_kinds.split(",") if k.strip()} or None
+
+
+def process(cfg, stop_requested=lambda: False, kinds=None):
     """Run at most FAILOVER_MAX_JOBS_PER_CYCLE bounded jobs through the shared executor lock."""
     from app import jobs
 
@@ -201,7 +205,7 @@ def process(cfg, stop_requested=lambda: False):
     for _ in range(cfg.failover_max_jobs_per_cycle):
         if stop_requested():
             break
-        result = jobs.run_next()
+        result = jobs.run_next(kinds) if kinds else jobs.run_next()
         results.append(result.get("status"))
         if result.get("status") in {"idle", "busy"}:
             break  # nothing eligible, or another executor (e.g. recovered Render) holds the lock
@@ -238,7 +242,8 @@ def cycle(cfg, state, client=None, session_factory=None, expected_head=None, sto
                 if problems:
                     report["action"], report["identity_problems"] = "refused_identity", problems
                 else:
-                    report["jobs"] = process(cfg, stop_requested)
+                    # In assist mode only the configured kinds run here; full failover runs all.
+                    report["jobs"] = process(cfg, stop_requested, assist_kinds(cfg) if assisting else None)
                     state["device_jobs_run"] += sum(1 for s in report["jobs"] if s not in {"idle", "busy", "fenced"})
                     report["action"] = "assist_processed" if assisting else "device_processed"
             except Exception as exc:  # noqa: BLE001 - pause and retry next cycle; never exit
