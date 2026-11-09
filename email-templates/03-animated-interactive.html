@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title>{{subject}}</title>
+<!--
+  Template 3: animated + interactive, built as progressive enhancement.
+  - No JavaScript anywhere: every email client strips it.
+  - CSS animation (headline rise, cover bars filling, button glow) plays in Apple Mail / iOS Mail and a
+    few others. Elsewhere (Gmail, Outlook) the same email shows its finished, static state.
+  - "Tap to see what's covered" tabs use the checkbox/radio technique. They work in Apple Mail /
+    iOS Mail; Gmail and Outlook get the fallback block with everything listed. Test in Litmus or
+    Email on Acid before any send.
+  - Web font for the headline in clients that load it; Arial everywhere else.
+  Merge fields as in templates 1 and 2.
+-->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<style>
+  .headline { font-family:'Fraunces', Georgia, 'Times New Roman', serif; }
+  @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  @keyframes fill { from { width:0; } }
+  @keyframes glow { 0%,100% { box-shadow:0 0 0 0 rgba(31,138,112,.55); } 50% { box-shadow:0 0 0 10px rgba(31,138,112,0); } }
+  .rise { animation:rise .9s ease-out both; }
+  .rise2 { animation:rise .9s .25s ease-out both; }
+  .bar { animation:fill 1.6s .5s cubic-bezier(.2,.7,.2,1) both; }
+  .cta { animation:glow 2.4s 1.8s ease-in-out 3; }
+  @media (prefers-reduced-motion: reduce) { .rise, .rise2, .bar, .cta { animation:none !important; } }
+
+  /* Interactive tabs: hidden by default, shown only in WebKit clients that support :checked. */
+  .interactive { display:none; max-height:0; overflow:hidden; mso-hide:all; }
+  .panel { display:none; }
+  @media screen and (-webkit-min-device-pixel-ratio:0) {
+    .interactive { display:block !important; max-height:none !important; overflow:visible !important; }
+    .fallback { display:none !important; }
+    #t-short:checked ~ .panels .p-short, #t-long:checked ~ .panels .p-long { display:block !important; }
+    #t-short:checked ~ .tabs .l-short, #t-long:checked ~ .tabs .l-long { background:#12324a !important; color:#ffffff !important; }
+  }
+  /* Gmail adds <u></u> before the body: keep it on the static fallback. */
+  u + .body .interactive { display:none !important; }
+  u + .body .fallback { display:block !important; }
+  @media (max-width:620px) { .gutter { padding-left:18px !important; padding-right:18px !important; } .h1 { font-size:26px !important; } }
+</style>
+</head>
+<body class="body" style="margin:0; padding:0; background:#0f2436;">
+<div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">{{preheader}}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f2436;">
+  <tr>
+    <td align="center" style="padding:26px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px;">
+        <!-- Hero on dark -->
+        <tr>
+          <td class="gutter" style="padding:20px 32px 28px; font-family:Arial, Helvetica, sans-serif; color:#d9e7ef;">
+            <p class="rise" style="margin:0 0 10px; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:#f2c14e; font-weight:bold;">{{brokerage_name}} &middot; for {{business_name}}</p>
+            <h1 class="headline h1 rise2" style="margin:0 0 14px; font-size:32px; line-height:1.15; color:#ffffff; font-weight:600;">One adviser for every kind of cover your business needs.</h1>
+            <p style="margin:0; font-size:16px; line-height:1.6; color:#b9cddb;">{{personal_line}}</p>
+          </td>
+        </tr>
+        <!-- White sheet -->
+        <tr>
+          <td style="background:#ffffff; border-radius:12px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td class="gutter" style="padding:28px 32px 6px; font-family:Arial, Helvetica, sans-serif; color:#1b2a36;">
+                  <p style="margin:0 0 14px; font-size:16px; line-height:1.6;">Good day,</p>
+                  <p style="margin:0 0 18px; font-size:16px; line-height:1.6;">Most small businesses we review are covered well on one side and thin on the other. A quick review shows where you stand:</p>
+                  <!-- Animated "cover check" bars: static at full length where animation isn't supported -->
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px; color:#4d5f6b;">
+                    <tr><td style="padding:0 0 4px;">Short-term: assets, vehicles, liability</td></tr>
+                    <tr><td style="padding:0 0 12px;"><div style="background:#e6eef2; border-radius:6px; height:10px;"><div class="bar" style="width:100%; height:10px; border-radius:6px; background:#1f8a70;"></div></div></td></tr>
+                    <tr><td style="padding:0 0 4px;">Long-term: key person, life, disability</td></tr>
+                    <tr><td style="padding:0 0 4px;"><div style="background:#e6eef2; border-radius:6px; height:10px;"><div class="bar" style="width:100%; height:10px; border-radius:6px; background:#f2c14e;"></div></div></td></tr>
+                  </table>
+                </td>
+              </tr>
+              <!-- Interactive tabs (Apple Mail / iOS Mail) -->
+              <tr>
+                <td class="gutter" style="padding:18px 32px 0; font-family:Arial, Helvetica, sans-serif; color:#1b2a36;">
+                  <div class="interactive">
+                    <input type="radio" name="tabs" id="t-short" checked style="display:none; mso-hide:all;">
+                    <input type="radio" name="tabs" id="t-long" style="display:none; mso-hide:all;">
+                    <div class="tabs" style="margin:0 0 10px;">
+                      <label for="t-short" class="l-short" style="display:inline-block; padding:8px 14px; margin-right:6px; border-radius:20px; border:1px solid #12324a; font-size:14px; font-weight:bold; color:#12324a; cursor:pointer;">Short-term cover</label>
+                      <label for="t-long" class="l-long" style="display:inline-block; padding:8px 14px; border-radius:20px; border:1px solid #12324a; font-size:14px; font-weight:bold; color:#12324a; cursor:pointer;">Long-term cover</label>
+                    </div>
+                    <div class="panels">
+                      <div class="panel p-short" style="font-size:15px; line-height:1.6; background:#f3f7f8; border-radius:8px; padding:14px 16px;">Buildings and contents, stock and equipment, business vehicles, public liability, business interruption and theft.</div>
+                      <div class="panel p-long" style="font-size:15px; line-height:1.6; background:#fbf6e6; border-radius:8px; padding:14px 16px;">Key-person cover, owner life and buy-and-sell cover, disability and income protection, staff group benefits.</div>
+                    </div>
+                  </div>
+                  <!-- Fallback for Gmail, Outlook and everything else: the same content, all visible -->
+                  <div class="fallback">
+                    <p style="margin:0 0 6px; font-size:15px; line-height:1.6;"><strong>Short-term:</strong> buildings and contents, stock and equipment, business vehicles, public liability, business interruption and theft.</p>
+                    <p style="margin:0; font-size:15px; line-height:1.6;"><strong>Long-term:</strong> key-person cover, owner life and buy-and-sell cover, disability and income protection, staff group benefits.</p>
+                  </div>
+                </td>
+              </tr>
+              <!-- CTA -->
+              <tr>
+                <td class="gutter" style="padding:24px 32px 8px; font-family:Arial, Helvetica, sans-serif; color:#1b2a36;">
+                  <a class="cta" href="mailto:{{reply_address}}?subject=Cover%20review%20for%20{{business_name}}" style="display:inline-block; background:#1f8a70; color:#ffffff; text-decoration:none; font-weight:bold; font-size:16px; line-height:48px; padding:0 28px; border-radius:24px;">Book a free cover review</a>
+                  <p style="margin:12px 0 0; font-size:14px; line-height:1.5; color:#4d5f6b;">Or simply reply to this email. Not interested? Reply "STOP" and we won't write again.</p>
+                </td>
+              </tr>
+              <tr>
+                <td class="gutter" style="padding:18px 32px 26px; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.5; color:#1b2a36;">
+                  Kind regards,<br><strong>{{advisor_name}}</strong>, {{advisor_role}}, {{brokerage_name}}<br><span style="color:#4d5f6b;">{{reply_address}}</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Footer on dark -->
+        <tr>
+          <td class="gutter" style="padding:18px 32px 8px; font-family:Arial, Helvetica, sans-serif; font-size:12px; line-height:1.5; color:#8fa7b8;">
+            {{brokerage_name}} is an authorised financial services provider (FSP {{fsp_number}}). {{postal_address}}.<br>
+            You're receiving this because {{business_name}} publishes this address as its business contact.
+            <a href="{{unsubscribe_url}}" style="color:#8fa7b8;">Unsubscribe</a>.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

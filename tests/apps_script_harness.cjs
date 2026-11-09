@@ -82,7 +82,7 @@ function environment(batch = fixture()) {
       computeDigest: (_algorithm, text) => Array.from(crypto.createHash('sha256').update(text, 'utf8').digest()).map(x => x > 127 ? x - 256 : x),
       newBlob: (content, mime, name) => ({content, mime, name}), formatDate: () => '2026-09-13', sleep: () => {}}
   });
-  for (const name of ['Code.gs', 'Backups.gs', 'Dashboard.gs', 'Delivery.gs', 'Roles.gs']) {
+  for (const name of ['Code.gs', 'Backups.gs', 'Dashboard.gs', 'Delivery.gs', 'Roles.gs', 'InterestLinks.gs']) {
     vm.runInContext(fs.readFileSync('apps-script/' + name, 'utf8'), context, {filename: name});
   }
   context.api_ = (path, method, body, operator) => {
@@ -415,6 +415,120 @@ test('contact role mailbox list matches the collector configuration', () => {
   const e = environment();
   assert.ok(locals.length > 10);
   assert.deepEqual(Object.keys(vm.runInContext('ROLE_LOCALS_', e.context)).sort(), locals.slice().sort());
+});
+
+const OPS_SECRET = 'ops-secret-for-offline-tests-0123456789abcdef';
+
+function hmacUtilities(target) {
+  let uuid = 0;
+  Object.assign(target, {
+    getUuid: () => 'uuid-' + (++uuid) + '-0123456789abcdef0123',
+    computeHmacSha256Signature: (value, key) => {
+      if (typeof value !== 'string' || typeof key !== 'string') throw new Error('Utilities.computeHmacSha256Signature: string args only');
+      return Array.from(crypto.createHmac('sha256', key).update(value, 'utf8').digest()).map(x => x > 127 ? x - 256 : x);
+    },
+  });
+}
+
+/** Delivery project (main harness env) plus the separate interest project sharing one spreadsheet. */
+function interestEnv() {
+  const e = environment();
+  hmacUtilities(e.context.Utilities);
+  businessTab(e, 'VALIDATED_A_001', [{id: 'cc:7', email: 'info@acme.co.za', name: 'Acme', url: 'https://www.acme.co.za/'}]);
+  const iprops = new Map();
+  const book = {getSheetByName: name => e.sheets.get(name), insertSheet: e.tab, getSheets: () => Array.from(e.sheets.values()),
+    getName: () => 'sheet'};
+  const utilities = {DigestAlgorithm: {SHA_256: 'sha256'}, Charset: {UTF_8: 'utf8'},
+    computeDigest: (_a, text) => Array.from(crypto.createHash('sha256').update(text, 'utf8').digest()).map(x => x > 127 ? x - 256 : x)};
+  hmacUtilities(utilities);
+  const ctx = vm.createContext({Date, JSON,
+    PropertiesService: {getScriptProperties: () => ({getProperty: k => iprops.get(k) || null, setProperty: (k, v) => iprops.set(k, v)})},
+    LockService: {getScriptLock: () => ({tryLock: () => true, releaseLock: () => {}})},
+    SpreadsheetApp: {openById: id => { assert.equal(id, 'sheet-test'); return book; }},
+    Utilities: utilities,
+    HtmlService: {createHtmlOutput: html => ({html, setTitle() { return this; }, addMetaTag() { return this; }})},
+    ContentService: {MimeType: {JSON: 'json'}, createTextOutput: text => ({text, setMimeType() { return this; }})},
+  });
+  const source = fs.readFileSync('apps-script-interest/Interest.gs', 'utf8').replace(
+    /const OPS_SECRET_SHA256_ = '[a-f0-9]{64}';/, "const OPS_SECRET_SHA256_ = '" + sha(OPS_SECRET) + "';");
+  vm.runInContext(source, ctx, {filename: 'apps-script-interest/Interest.gs'});
+  const base = 'https://script.google.com/macros/s/ABC_123-x/exec';
+  // The delivery project's interest_setup posts the shared secret to the interest web app.
+  e.context.UrlFetchApp = {fetch: (url, options) => {
+    assert.equal(url, base);
+    const out = ctx.doPost({postData: {contents: options.payload}});
+    return {getContentText: () => out.text, getResponseCode: () => 200};
+  }};
+  const setup = e.context.interestSetup_(base, OPS_SECRET);
+  assert.equal(setup.status, 'ok');
+  return {e, ctx, iprops, base};
+}
+
+test('interest: link from the delivery project verifies in the separate interest project; two steps; once per lead', () => {
+  const {e, ctx, iprops} = interestEnv();
+  assert.equal(iprops.get('INTEREST_SECRET'), e.props.get('INTEREST_SECRET'));
+  const url = e.context.interestUrl_('cc:7');
+  const m = /^https:\/\/script\.google\.com\/macros\/s\/ABC_123-x\/exec\?i=cc%3A7&t=([a-f0-9]{32})$/.exec(url);
+  assert.ok(m, url);
+  const token = m[1];
+  const page = ctx.doGet({parameter: {i: 'cc:7', t: token}}).html;
+  assert.ok(page.includes('Yes, contact me') && page.includes('recordInterest'));
+  assert.equal(e.sheets.get('INTEREST'), undefined);  // opening the link (a scanner) records nothing
+  assert.equal(ctx.recordInterest('cc:7', token), 'recorded');
+  const first = e.sheets.get('INTEREST').values[1].slice();
+  assert.equal(ctx.recordInterest('cc:7', token), 'recorded');
+  assert.equal(e.sheets.get('INTEREST').getLastRow(), 2);
+  assert.deepEqual(e.sheets.get('INTEREST').values[1], first);
+  const row = Object.fromEntries(e.sheets.get('INTEREST').values[0].map((h, i) => [h, first[i]]));
+  assert.equal(row.business_name, 'Acme'); assert.equal(row.email, 'info@acme.co.za');
+  assert.equal(row.website, 'https://acme.co.za/'); assert.equal(row.status, 'interested');
+  const count = JSON.parse(ctx.doPost({postData: {contents: JSON.stringify({action: 'count', auth: OPS_SECRET})}}).text);
+  assert.equal(count.interested, 1);
+});
+
+test('interest: forged, tampered, non-string or malformed input is refused and records nothing', () => {
+  const {e, ctx} = interestEnv();
+  const token = /t=([a-f0-9]{32})/.exec(e.context.interestUrl_('cc:7'))[1];
+  const other = /t=([a-f0-9]{32})/.exec(e.context.interestUrl_('cc:8'))[1];
+  const cases = [['cc:7', other], ['cc:8', token], ['cc:7', token.slice(0, 31) + (token[31] === 'a' ? 'b' : 'a')],
+    ['cc:7', ''], ['', token], ['<script>', token], ['cc:7', token.toUpperCase()], [['cc:7'], token], [[['cc:7']], token],
+    ['cc:7', [token]], [{toString: () => 'cc:7'}, token], [undefined, undefined]];
+  for (const [i, t] of cases) {
+    assert.equal(ctx.recordInterest(i, t), 'invalid', JSON.stringify([i, t]));
+    const page = ctx.doGet({parameter: {i, t}}).html;
+    assert.ok(page.includes("This link isn") && !page.includes('recordInterest'), JSON.stringify(i));
+  }
+  assert.ok(ctx.doGet(undefined).html.includes("This link isn"));
+  assert.equal(e.sheets.get('INTEREST'), undefined);
+  for (const body of [{action: 'count'}, {action: 'count', auth: 'wrong-secret-wrong-secret-wrong-secret'}, {action: 'configure', auth: 'x'}]) {
+    assert.equal(JSON.parse(ctx.doPost({postData: {contents: JSON.stringify(body)}}).text).status, 'unauthorized');
+  }
+  const rotate = JSON.parse(ctx.doPost({postData: {contents: JSON.stringify({action: 'configure', auth: OPS_SECRET,
+    secret: 'a'.repeat(60), spreadsheet_id: 'sheet-test'})}}).text);
+  assert.equal(rotate.status, 'secret_already_set');  // a configured secret is never silently replaced
+});
+
+test('interest: only doGet, doPost and recordInterest are public in the interest project', () => {
+  const source = fs.readFileSync('apps-script-interest/Interest.gs', 'utf8');
+  const publicFns = [...source.matchAll(/^function\s+([A-Za-z0-9_$]+)\s*\(/gm)].map(m => m[1]).filter(n => !n.endsWith('_'));
+  assert.deepEqual(publicFns.sort(), ['doGet', 'doPost', 'recordInterest']);
+});
+
+test('delivery project never serves a web page (google.script.run would expose its functions)', () => {
+  for (const name of fs.readdirSync('apps-script').filter(f => f.endsWith('.gs'))) {
+    const source = fs.readFileSync('apps-script/' + name, 'utf8');
+    assert.ok(!/function\s+doGet\s*\(/.test(source) && !/HtmlService/.test(source), name);
+  }
+});
+
+test('interest secret is created once; links refuse a foreign base URL', () => {
+  const {e} = interestEnv();
+  const secret = e.props.get('INTEREST_SECRET');
+  e.context.interestSecret_(true);
+  assert.equal(e.props.get('INTEREST_SECRET'), secret);
+  assert.equal(e.context.interestSetup_('https://evil.example/exec', OPS_SECRET).status, 'bad_base_url');
+  e.props.set('INTEREST_BASE_URL', 'https://evil.example/exec');
+  assert.throws(() => e.context.interestUrl_('cc:7'), /INTEREST_BASE_URL_INVALID/);
 });
 
 console.log('apps-script tests: ' + passed + ' passed (offline mocks only)');

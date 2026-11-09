@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{{subject}}</title>
+<!--
+  Template 2: branded card. Header band, personalised intro, two cover cards, one bulletproof button
+  (VML fallback so it is a real button in Outlook desktop too). Table layout + inline styles, so it
+  renders in Gmail, Outlook, Apple Mail and mobile clients. No JavaScript, no animation.
+  Merge fields as in template 1, plus {{brokerage_initials}}.
+-->
+<!--[if mso]><style>table,td{font-family:Arial,Helvetica,sans-serif !important;}</style><![endif]-->
+<style>
+  @media (max-width: 620px) {
+    .stack { display:block !important; width:100% !important; }
+    .gutter { padding-left:18px !important; padding-right:18px !important; }
+    .card-gap { padding:0 0 12px 0 !important; }
+  }
+  @media (prefers-color-scheme: dark) {
+    .page { background:#0e1a22 !important; }
+    .sheet { background:#15242e !important; }
+    .ink { color:#e3ecf1 !important; }
+    .muted { color:#93a8b5 !important; }
+    .card { background:#1b2f3b !important; border-color:#27414f !important; }
+    .note { background:#22323d !important; }
+  }
+</style>
+</head>
+<body class="page" style="margin:0; padding:0; background:#eef3f5;">
+<div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">{{preheader}}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="page" style="background:#eef3f5;">
+  <tr>
+    <td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" class="sheet" style="width:100%; max-width:600px; background:#ffffff; border-radius:10px; overflow:hidden;">
+        <!-- Header band -->
+        <tr>
+          <td class="gutter" style="background:#12324a; padding:22px 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+              <tr>
+                <td style="font-family:Arial, Helvetica, sans-serif;">
+                  <span style="display:inline-block; width:34px; height:34px; line-height:34px; text-align:center; border-radius:8px; background:#1f8a70; color:#ffffff; font-weight:bold; font-size:14px;">{{brokerage_initials}}</span>
+                  <span style="font-size:16px; font-weight:bold; color:#ffffff; padding-left:10px; vertical-align:middle;">{{brokerage_name}}</span>
+                </td>
+                <td align="right" style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#a9c3d3;">Business cover review</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Intro -->
+        <tr>
+          <td class="gutter ink" style="padding:30px 32px 8px; font-family:Arial, Helvetica, sans-serif; color:#1b2a36;">
+            <p style="margin:0 0 6px; font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:#1f8a70; font-weight:bold;">For {{business_name}}</p>
+            <h1 style="margin:0 0 16px; font-size:24px; line-height:1.25; font-weight:bold;">Is your cover keeping up with the business?</h1>
+            <p style="margin:0 0 14px; font-size:16px; line-height:1.6;">Good day,</p>
+            <p class="note" style="margin:0 0 14px; font-size:16px; line-height:1.6; background:#f3f7f8; border-left:4px solid #f2c14e; padding:12px 14px;">{{personal_line}}</p>
+            <p style="margin:0 0 4px; font-size:16px; line-height:1.6;">We help businesses like yours with both kinds of cover, through one adviser:</p>
+          </td>
+        </tr>
+        <!-- Two cover cards -->
+        <tr>
+          <td class="gutter" style="padding:14px 32px 6px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+              <tr>
+                <td class="stack card-gap" width="50%" valign="top" style="padding:0 6px 0 0;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="card" style="background:#f6fafb; border:1px solid #dce7ec; border-radius:8px;">
+                    <tr><td class="ink" style="padding:16px; font-family:Arial, Helvetica, sans-serif; color:#1b2a36;">
+                      <p style="margin:0 0 6px; font-size:15px; font-weight:bold;">Short-term cover</p>
+                      <p class="muted" style="margin:0; font-size:14px; line-height:1.55; color:#4d5f6b;">Premises and contents, stock, business vehicles, public liability and business interruption.</p>
+                    </td></tr>
+                  </table>
+                </td>
+                <td class="stack card-gap" width="50%" valign="top" style="padding:0 0 0 6px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="card" style="background:#f6fafb; border:1px solid #dce7ec; border-radius:8px;">
+                    <tr><td class="ink" style="padding:16px; font-family:Arial, Helvetica, sans-serif; color:#1b2a36;">
+                      <p style="margin:0 0 6px; font-size:15px; font-weight:bold;">Long-term cover</p>
+                      <p class="muted" style="margin:0; font-size:14px; line-height:1.55; color:#4d5f6b;">Key-person and owner life cover, disability and income protection, and staff benefits.</p>
+                    </td></tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Call to action: bulletproof button (VML for Outlook desktop) -->
+        <tr>
+          <td class="gutter ink" style="padding:18px 32px 8px; font-family:Arial, Helvetica, sans-serif; color:#1b2a36;">
+            <p style="margin:0 0 16px; font-size:16px; line-height:1.6;">Interested in a free review? Reply to this email, or use the button, and we'll find a time that suits you.</p>
+            <!--[if mso]>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="mailto:{{reply_address}}?subject=Cover%20review%20for%20{{business_name}}" style="height:46px;v-text-anchor:middle;width:240px;" arcsize="18%" stroke="f" fillcolor="#1f8a70">
+              <w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Yes, I'm interested</center>
+            </v:roundrect>
+            <![endif]-->
+            <!--[if !mso]><!-->
+            <a href="mailto:{{reply_address}}?subject=Cover%20review%20for%20{{business_name}}" style="display:inline-block; background:#1f8a70; color:#ffffff; text-decoration:none; font-weight:bold; font-size:16px; line-height:46px; padding:0 26px; border-radius:8px;">Yes, I'm interested</a>
+            <!--<![endif]-->
+          </td>
+        </tr>
+        <!-- Signature -->
+        <tr>
+          <td class="gutter ink" style="padding:18px 32px 28px; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.5; color:#1b2a36;">
+            Kind regards,<br><strong>{{advisor_name}}</strong>, {{advisor_role}}<br>
+            <span class="muted" style="color:#4d5f6b;">{{reply_address}}</span>
+          </td>
+        </tr>
+        <!-- Footer -->
+        <tr>
+          <td class="gutter muted" style="padding:16px 32px 24px; background:#f3f6f8; font-family:Arial, Helvetica, sans-serif; font-size:12px; line-height:1.5; color:#5b6b78;">
+            {{brokerage_name}} is an authorised financial services provider (FSP {{fsp_number}}). {{postal_address}}.<br>
+            You're receiving this because {{business_name}} publishes this address as its business contact.
+            Reply "STOP" or <a href="{{unsubscribe_url}}" style="color:#5b6b78;">unsubscribe</a> and we won't email you again.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

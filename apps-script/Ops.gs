@@ -145,6 +145,15 @@ function doPost(e) {
         return opsOut_({status: 'ok', snapshot: {spreadsheet_sha256: opsHex_(config_().sheet),
           captured_at: new Date().toISOString(), tabs: tabs}});
       }
+      case 'interest_setup':
+        // Creates the signing secret once (never returned) and configures the separate interest web app.
+        return opsOut_(interestSetup_(String(request.base_url || ''), request.secret));
+      case 'interest_link':
+        // One signed link for a lead id (used by the draft service and for testing).
+        if (!INTEREST_LEAD_.test(String(request.lead_id || ''))) return opsOut_({status: 'bad_lead_id'});
+        return opsOut_({status: 'ok', url: interestUrl_(String(request.lead_id))});
+      case 'interest_count':
+        return opsOut_(interestCount_(request.secret));
       case 'contact_roles':
         // Separate CONTACT_ROLES_### entries for delivered business leads; counts only in the response.
         return opsOut_(contactRoles(request.limit, request.seconds));

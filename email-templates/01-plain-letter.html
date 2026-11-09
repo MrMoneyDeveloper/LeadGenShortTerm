@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<title>{{subject}}</title>
+<!--
+  Template 1: plain letter. Highest deliverability and the most "written by a person" feel.
+  No images, no web fonts, no CSS animation. Works the same in every client, including Outlook.
+  Merge fields: {{subject}} {{business_name}} {{personal_line}} {{advisor_name}} {{advisor_role}}
+  {{brokerage_name}} {{fsp_number}} {{reply_address}} {{postal_address}} {{unsubscribe_url}}
+  {{preheader}} (inbox preview text).
+-->
+<style>
+  @media (prefers-color-scheme: dark) {
+    .bg { background: #10161c !important; }
+    .ink { color: #e6edf2 !important; }
+    .muted { color: #9fb0bd !important; }
+    .rule { border-color: #2a3742 !important; }
+  }
+  @media (max-width: 620px) { .wrap { padding: 24px 18px !important; } }
+</style>
+</head>
+<body class="bg" style="margin:0; padding:0; background:#ffffff;">
+<div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">{{preheader}}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg" style="background:#ffffff;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px;">
+        <tr>
+          <td class="wrap ink" style="padding:36px 32px; font-family:Georgia, 'Times New Roman', serif; font-size:17px; line-height:1.6; color:#1b2a36;">
+            <p style="margin:0 0 18px;">Good day,</p>
+            <p style="margin:0 0 18px;">{{personal_line}}</p>
+            <p style="margin:0 0 18px;">I'm {{advisor_name}}, {{advisor_role}} at {{brokerage_name}}. We help South African businesses like
+              {{business_name}} put the right cover in place, on both sides:</p>
+            <p style="margin:0 0 6px;"><strong>Short-term:</strong> premises, contents and stock, business vehicles, liability and business interruption.</p>
+            <p style="margin:0 0 18px;"><strong>Long-term:</strong> key-person and life cover, disability and income protection for owners and staff.</p>
+            <p style="margin:0 0 18px;">If you'd like a no-obligation look at what you have now, just reply to this email with a convenient time and
+              I'll set up a short call. If it isn't a fit, no further mail will follow.</p>
+            <p style="margin:0 0 4px;">Kind regards,</p>
+            <p style="margin:0;"><strong>{{advisor_name}}</strong><br>{{advisor_role}}, {{brokerage_name}}<br>
+              <span class="muted" style="color:#5b6b78;">{{reply_address}}</span></p>
+          </td>
+        </tr>
+        <tr>
+          <td class="wrap muted rule" style="padding:18px 32px 36px; border-top:1px solid #e3e8ec; font-family:Arial, Helvetica, sans-serif; font-size:12px; line-height:1.5; color:#5b6b78;">
+            {{brokerage_name}} is an authorised financial services provider (FSP {{fsp_number}}). {{postal_address}}.<br>
+            You're receiving this because {{business_name}} publishes this address as its business contact.
+            To stop receiving our mail, reply "STOP" or <a href="{{unsubscribe_url}}" style="color:#5b6b78;">unsubscribe here</a>.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

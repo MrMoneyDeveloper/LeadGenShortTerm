@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<title>{{subject}}</title>
+<!--
+  Template 4 (chosen draft): dark theme, light-hearted opener, unbranded body.
+  - No JavaScript (every email client strips it). CSS animation plays in Apple Mail / iOS Mail; Gmail and
+    Outlook show the finished still frame. Tabs work in Apple Mail; everyone else gets the full list.
+  - The button opens {{interest_url}}: a signed, per-company link to the Google Apps Script interest
+    endpoint. One click records the interest flag for that lead and shows the "we'll be in touch" page
+    (05-interest-confirmed.html). The button inside the email itself cannot change after a click, because
+    email has no scripts; the confirmation happens on the page it opens.
+  - The footer keeps the minimum sender identification and opt-out that compliance will require.
+  Merge fields: {{subject}} {{preheader}} {{business_name}} {{personal_line}} {{interest_url}}
+  {{reply_address}} {{legal_sender_name}} {{unsubscribe_url}}
+  FSP disclosure left out for now (operator request 2026-11-09); compliance decides before any send.
+-->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&display=swap" rel="stylesheet">
+<style>
+  .headline { font-family:'Fraunces', Georgia, 'Times New Roman', serif; }
+  @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  @keyframes fill { from { width:0; } }
+  @keyframes glow { 0%,100% { box-shadow:0 0 0 0 rgba(242,193,78,.55); } 50% { box-shadow:0 0 0 12px rgba(242,193,78,0); } }
+  .rise { animation:rise .9s ease-out both; }
+  .rise2 { animation:rise .9s .25s ease-out both; }
+  .rise3 { animation:rise .9s .5s ease-out both; }
+  .bar { animation:fill 1.6s .8s cubic-bezier(.2,.7,.2,1) both; }
+  .bar2 { animation:fill 1.6s 1s cubic-bezier(.2,.7,.2,1) both; }
+  .bar3 { animation:fill 1.6s 1.2s cubic-bezier(.2,.7,.2,1) both; }
+  .bar4 { animation:fill 1.6s 1.4s cubic-bezier(.2,.7,.2,1) both; }
+  .cta { animation:glow 2.4s 2.4s ease-in-out 3; }
+  @media (prefers-reduced-motion: reduce) { .rise, .rise2, .rise3, .bar, .bar2, .bar3, .bar4, .cta { animation:none !important; } }
+
+  .interactive { display:none; max-height:0; overflow:hidden; mso-hide:all; }
+  .panel { display:none; }
+  @media screen and (-webkit-min-device-pixel-ratio:0) {
+    .interactive { display:block !important; max-height:none !important; overflow:visible !important; }
+    .fallback { display:none !important; }
+    #t-biz:checked ~ .panels .p-biz, #t-people:checked ~ .panels .p-people { display:block !important; }
+    #t-biz:checked ~ .tabs .l-biz, #t-people:checked ~ .tabs .l-people { background:#f2c14e !important; color:#0f2436 !important; border-color:#f2c14e !important; }
+  }
+  u + .body .interactive { display:none !important; }
+  u + .body .fallback { display:block !important; }
+  @media (max-width:620px) { .gutter { padding-left:18px !important; padding-right:18px !important; } .h1 { font-size:27px !important; } }
+</style>
+</head>
+<body class="body" style="margin:0; padding:0; background:#0f2436;">
+<div style="display:none; max-height:0; overflow:hidden; mso-hide:all;">{{preheader}}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0f2436;">
+  <tr>
+    <td align="center" style="padding:26px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px;">
+        <!-- Opener -->
+        <tr>
+          <td class="gutter" style="padding:22px 32px 26px; font-family:Arial, Helvetica, sans-serif; color:#d9e7ef;">
+            <p class="rise" style="margin:0 0 12px; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:#f2c14e; font-weight:bold;">For {{business_name}}</p>
+            <p class="rise" style="margin:0 0 16px; font-size:16px; line-height:1.6; color:#b9cddb;">Good day,</p>
+            <p class="rise2" style="margin:0 0 18px; font-size:16px; line-height:1.6; color:#b9cddb;">Let's get the obvious out of the way: you probably get emails like this all the time. Who doesn't? Somewhere there's an inbox made entirely of insurance offers, and it's not a happy place. We'll keep this one short.</p>
+            <h1 class="headline h1 rise3" style="margin:0 0 14px; font-size:32px; line-height:1.15; color:#ffffff; font-weight:600;">Cover for the business, and for the people who run it.</h1>
+            <p style="margin:0; font-size:16px; line-height:1.6; color:#b9cddb;">{{personal_line}}</p>
+          </td>
+        </tr>
+        <!-- Sheet -->
+        <tr>
+          <td style="background:#162f43; border-radius:12px; border:1px solid #23435a;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td class="gutter" style="padding:26px 32px 4px; font-family:Arial, Helvetica, sans-serif; color:#e6eff4;">
+                  <p style="margin:0 0 16px; font-size:16px; line-height:1.6;">Here's what we look after, in one place:</p>
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:13px; color:#a9c0cf;">
+                    <tr><td style="padding:0 0 4px;">Property, contents and stock</td></tr>
+                    <tr><td style="padding:0 0 12px;"><div style="background:#22405a; border-radius:6px; height:9px;"><div class="bar" style="width:100%; height:9px; border-radius:6px; background:#39b493;"></div></div></td></tr>
+                    <tr><td style="padding:0 0 4px;">Vehicles, liability and business interruption</td></tr>
+                    <tr><td style="padding:0 0 12px;"><div style="background:#22405a; border-radius:6px; height:9px;"><div class="bar2" style="width:100%; height:9px; border-radius:6px; background:#4fc3d9;"></div></div></td></tr>
+                    <tr><td style="padding:0 0 4px;">Life, key-person and disability cover</td></tr>
+                    <tr><td style="padding:0 0 12px;"><div style="background:#22405a; border-radius:6px; height:9px;"><div class="bar3" style="width:100%; height:9px; border-radius:6px; background:#f2c14e;"></div></div></td></tr>
+                    <tr><td style="padding:0 0 4px;">Retirement and employee benefits</td></tr>
+                    <tr><td style="padding:0 0 4px;"><div style="background:#22405a; border-radius:6px; height:9px;"><div class="bar4" style="width:100%; height:9px; border-radius:6px; background:#f28c6b;"></div></div></td></tr>
+                  </table>
+                </td>
+              </tr>
+              <!-- Tabs (Apple Mail / iOS Mail); fallback lists everything -->
+              <tr>
+                <td class="gutter" style="padding:20px 32px 0; font-family:Arial, Helvetica, sans-serif; color:#e6eff4;">
+                  <div class="interactive">
+                    <input type="radio" name="tabs" id="t-biz" checked style="display:none; mso-hide:all;">
+                    <input type="radio" name="tabs" id="t-people" style="display:none; mso-hide:all;">
+                    <div class="tabs" style="margin:0 0 10px;">
+                      <label for="t-biz" class="l-biz" style="display:inline-block; padding:8px 14px; margin-right:6px; border-radius:20px; border:1px solid #5d8099; font-size:14px; font-weight:bold; color:#e6eff4; cursor:pointer;">For the business</label>
+                      <label for="t-people" class="l-people" style="display:inline-block; padding:8px 14px; border-radius:20px; border:1px solid #5d8099; font-size:14px; font-weight:bold; color:#e6eff4; cursor:pointer;">For your people</label>
+                    </div>
+                    <div class="panels">
+                      <div class="panel p-biz" style="font-size:15px; line-height:1.6; background:#1d3a50; border-radius:8px; padding:14px 16px;">Buildings and property, contents and stock, equipment, business vehicles, public liability, business interruption and theft.</div>
+                      <div class="panel p-people" style="font-size:15px; line-height:1.6; background:#1d3a50; border-radius:8px; padding:14px 16px;">Owner life and key-person cover, buy-and-sell agreements, disability and income protection, retirement funding, and group life and retirement benefits for employees.</div>
+                    </div>
+                  </div>
+                  <div class="fallback">
+                    <p style="margin:0 0 6px; font-size:15px; line-height:1.6;"><strong style="color:#ffffff;">For the business:</strong> buildings and property, contents and stock, equipment, business vehicles, public liability, business interruption and theft.</p>
+                    <p style="margin:0; font-size:15px; line-height:1.6;"><strong style="color:#ffffff;">For your people:</strong> owner life and key-person cover, buy-and-sell agreements, disability and income protection, retirement funding, and group life and retirement benefits for employees.</p>
+                  </div>
+                </td>
+              </tr>
+              <!-- CTA: one click records interest -->
+              <tr>
+                <td class="gutter" style="padding:26px 32px 8px; font-family:Arial, Helvetica, sans-serif; color:#e6eff4;">
+                  <a class="cta" href="{{interest_url}}" style="display:inline-block; background:#f2c14e; color:#0f2436; text-decoration:none; font-weight:bold; font-size:16px; line-height:50px; padding:0 30px; border-radius:25px;">I'm interested</a>
+                  <p style="margin:14px 0 0; font-size:14px; line-height:1.55; color:#a9c0cf;">One click is all it takes, or just reply to this email. Either way, someone will be in touch.</p>
+                  <p style="margin:8px 0 0; font-size:14px; line-height:1.55; color:#a9c0cf;">Not for you? Reply "STOP" and you won't hear from us again.</p>
+                </td>
+              </tr>
+              <tr>
+                <td class="gutter" style="padding:18px 32px 26px; font-family:Arial, Helvetica, sans-serif; font-size:15px; line-height:1.5; color:#e6eff4;">Speak soon.</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <!-- Required sender identification and opt-out -->
+        <tr>
+          <td class="gutter" style="padding:18px 32px 8px; font-family:Arial, Helvetica, sans-serif; font-size:12px; line-height:1.5; color:#8fa7b8;">
+            Sent by {{legal_sender_name}}, Durban North, KwaZulu-Natal.<br>
+            You're receiving this because {{business_name}} publishes this address as its business contact.
+            <a href="{{unsubscribe_url}}" style="color:#8fa7b8;">Unsubscribe</a>.
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

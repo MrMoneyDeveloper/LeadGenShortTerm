@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thanks, we'll be in touch</title>
+<!--
+  Page served by the Google Apps Script interest endpoint after the "I'm interested" click.
+  The endpoint verifies the signed link, records the interest flag for that lead once (repeat clicks
+  keep the first time), then returns this page. Merge field: {{business_name}}.
+-->
+<style>
+  body { margin:0; background:#0f2436; color:#e6eff4; font-family:Arial, Helvetica, sans-serif; }
+  .wrap { max-width:520px; margin:0 auto; padding:72px 22px; }
+  .tick { width:64px; height:64px; border-radius:50%; background:#f2c14e; color:#0f2436; font-size:34px; line-height:64px; text-align:center; font-weight:bold; }
+  h1 { font-family:Georgia, 'Times New Roman', serif; font-size:30px; line-height:1.2; margin:24px 0 12px; color:#ffffff; }
+  p { font-size:16px; line-height:1.6; color:#b9cddb; margin:0 0 12px; }
+  @keyframes pop { from { transform:scale(.6); opacity:0; } to { transform:none; opacity:1; } }
+  .tick { animation:pop .5s ease-out both; }
+  @media (prefers-reduced-motion: reduce) { .tick { animation:none; } }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tick" aria-hidden="true">&#10003;</div>
+    <h1>Got it. We'll be in touch.</h1>
+    <p>Thanks for letting us know, {{business_name}}. Someone will contact you within one working day to find a time that suits you.</p>
+    <p>Nothing else to do. You can close this page.</p>
+  </div>
+</body>
+</html>
