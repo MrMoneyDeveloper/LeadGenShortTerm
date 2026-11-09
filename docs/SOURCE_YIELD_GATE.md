@@ -248,5 +248,5 @@ Run fixes made live (all regression-tested): throttled pages queued for retry in
 batch; device assist limited to collection and yielding to cloud work; set-based record admission
 (the PC is far from the database); scheduler runs several jobs per tick; failover loop survives
 transient OS errors; a delivery helper drove Apps Script delivery when the 5-minute trigger fell behind.
-Supply after the run: about 40% of the crawl's .za index was read. Afterwards: sources disabled,
+Supply after the run: 48% of the crawl's .za index was read. Afterwards: sources disabled,
 campaign COMPLETE, queues empty; contact-role entries (CONTACT_ROLES_###) generated from the Sheet.
