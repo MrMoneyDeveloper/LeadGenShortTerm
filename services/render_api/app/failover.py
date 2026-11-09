@@ -304,6 +304,14 @@ def single_instance(path=None):
         handle.close()
 
 
+def stop_requested():
+    """STOP file present. A transient OS error (e.g. low memory) is not a stop and never a crash."""
+    try:
+        return STOP_FILE.exists()
+    except OSError:
+        return False
+
+
 def run(cfg, max_cycles=None, sleep=time.sleep, until=None, clock=time.time):
     """Loop until STOP, ``max_cycles`` or the wall-clock ``until`` (epoch seconds) is reached."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -312,8 +320,8 @@ def run(cfg, max_cycles=None, sleep=time.sleep, until=None, clock=time.time):
     with single_instance():
         state = load_state()
         cycles = 0
-        while not STOP_FILE.exists() and (until is None or clock() < until):
-            state, report = safe_cycle(cfg, state, stop_requested=STOP_FILE.exists)
+        while not stop_requested() and (until is None or clock() < until):
+            state, report = safe_cycle(cfg, state, stop_requested=stop_requested)
             try:
                 save_state(state)
             except OSError:
@@ -323,10 +331,10 @@ def run(cfg, max_cycles=None, sleep=time.sleep, until=None, clock=time.time):
             if max_cycles is not None and cycles >= max_cycles:
                 break
             for _ in range(cfg.failover_interval_seconds):
-                if STOP_FILE.exists() or (until is not None and clock() >= until):
+                if stop_requested() or (until is not None and clock() >= until):
                     break
                 sleep(1)
-        if STOP_FILE.exists():
+        if stop_requested():
             STOP_FILE.unlink()
     return state
 
