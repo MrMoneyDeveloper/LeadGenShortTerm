@@ -196,6 +196,22 @@ def assist_kinds(cfg):
     return {k.strip() for k in cfg.failover_assist_kinds.split(",") if k.strip()} or None
 
 
+ASSIST_YIELD_SECONDS = 30
+
+
+def cloud_work_waiting(kinds):
+    """Due jobs of kinds the device does not run, queued for more than ASSIST_YIELD_SECONDS."""
+    from datetime import timedelta
+
+    from app.database import session
+    from app.models import Job, now
+
+    with session() as db:
+        return db.scalar(select(Job.id).where(
+            Job.status == "QUEUED", Job.kind.not_in(sorted(kinds)), Job.available_at <= now(),
+            Job.created_at <= now() - timedelta(seconds=ASSIST_YIELD_SECONDS)).limit(1)) is not None
+
+
 def process(cfg, stop_requested=lambda: False, kinds=None):
     """Run at most FAILOVER_MAX_JOBS_PER_CYCLE bounded jobs through the shared executor lock."""
     from app import jobs
@@ -204,6 +220,11 @@ def process(cfg, stop_requested=lambda: False, kinds=None):
     jobs.schedule_tick()  # enqueue-only; same idempotent stage scheduling as Render
     for _ in range(cfg.failover_max_jobs_per_cycle):
         if stop_requested():
+            break
+        if kinds and cloud_work_waiting(kinds):
+            # Assist must never starve the cloud: while jobs this device does not run have been
+            # waiting, yield the shared lock until the next cycle.
+            results.append("yield")
             break
         result = jobs.run_next(kinds) if kinds else jobs.run_next()
         results.append(result.get("status"))

@@ -368,6 +368,25 @@ def test_assist_kinds_leave_database_stages_to_the_cloud(postgres, isolated_sett
     assert jobs.run_next()["status"] == "complete"  # the cloud (no kind filter) still runs it
 
 
+@pytest.mark.integration
+def test_assist_yields_while_cloud_work_waits(postgres, isolated_settings):
+    from app.models import Job, PipelineState
+
+    jobs.initialize()
+    cfg = configure(isolated_settings, True)
+    cfg.failover_assist_kinds = "collect"
+    with postgres() as db:
+        db.get(PipelineState, 1).paused = False
+        db.add(Job(idempotency_key="old-validate", kind="validate", source=None, batch_size=10,
+                   created_at=now() - timedelta(minutes=5)))
+        healthy_cloud(db)
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={})))
+    _state, report = failover.cycle(cfg, failover.default_state(), client=client, session_factory=postgres)
+    assert report["jobs"] == ["yield"]
+    with postgres() as db:
+        assert db.query(Job).filter(Job.idempotency_key == "old-validate").one().status == "QUEUED"
+
+
 def test_scheduler_runs_several_jobs_per_tick_until_idle(isolated_settings, monkeypatch):
     from contextlib import contextmanager
 
