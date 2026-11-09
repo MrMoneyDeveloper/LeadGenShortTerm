@@ -145,6 +145,9 @@ function doPost(e) {
         return opsOut_({status: 'ok', snapshot: {spreadsheet_sha256: opsHex_(config_().sheet),
           captured_at: new Date().toISOString(), tabs: tabs}});
       }
+      case 'contact_roles':
+        // Separate CONTACT_ROLES_### entries for delivered business leads; counts only in the response.
+        return opsOut_(contactRoles(request.limit, request.seconds));
       case 'peek':
         return opsOut_({status: 'ok', peek: peekLeads_(Math.min(Number(request.rows) || 5, 20))});
       default:

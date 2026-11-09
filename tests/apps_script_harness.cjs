@@ -82,7 +82,7 @@ function environment(batch = fixture()) {
       computeDigest: (_algorithm, text) => Array.from(crypto.createHash('sha256').update(text, 'utf8').digest()).map(x => x > 127 ? x - 256 : x),
       newBlob: (content, mime, name) => ({content, mime, name}), formatDate: () => '2026-09-13', sleep: () => {}}
   });
-  for (const name of ['Code.gs', 'Backups.gs', 'Dashboard.gs', 'Delivery.gs']) {
+  for (const name of ['Code.gs', 'Backups.gs', 'Dashboard.gs', 'Delivery.gs', 'Roles.gs']) {
     vm.runInContext(fs.readFileSync('apps-script/' + name, 'utf8'), context, {filename: name});
   }
   context.api_ = (path, method, body, operator) => {
@@ -336,4 +336,85 @@ test('no-email prospects go to PROSPECTS tabs, indexed and backed up separately'
     assert.throws(() => bad.context.deliverFinalLeads(), /DELIVERY_PLACEMENT_INVALID/, tab);
   }
 });
+function businessTab(e, name, leads) {
+  const tab = e.tab(name);
+  tab.values.push(['lead_id', 'email', 'business_name', 'source_url', 'product_type']);
+  leads.forEach(l => tab.values.push([l.id, l.email, l.name, l.url, l.product || 'BUSINESS_CONTACT']));
+  return tab;
+}
+
+function pages(e, byUrl) {
+  const fetched = [];
+  e.context.UrlFetchApp = {fetchAll: requests => requests.map(r => {
+    fetched.push(r.url);
+    const html = byUrl[r.url];
+    return {getResponseCode: () => (html === undefined ? 404 : 200), getContentText: () => html || ''};
+  })};
+  return fetched;
+}
+
+test('contact roles: separate entries, best generic mailbox, never named people', () => {
+  const e = environment();
+  businessTab(e, 'VALIDATED_A_001', [
+    {id: 'cc:1', email: 'info@acme.co.za', name: 'Acme', url: 'https://www.acme.co.za/'},
+    {id: 'cc:2', email: 'sales@beta.co.za', name: 'Beta', url: 'https://beta.co.za/contact'},
+    {id: 'cc:3', email: 'info@gone.co.za', name: 'Gone', url: 'https://gone.co.za/'},
+    {id: 'p:4', email: 'person@example.com', name: '', url: 'https://bsky.app/x', product: 'MOTOR'},
+  ]);
+  const before = JSON.stringify(e.sheets.get('VALIDATED_A_001').values);
+  const fetched = pages(e, {
+    'https://www.acme.co.za/': 'info@acme.co.za | accounts@acme.co.za | jane.doe@acme.co.za | info@co.za | admin@other.co.za',
+    'https://beta.co.za/contact': 'Sales: sales@beta.co.za, support@beta.co.za',
+  });
+  const result = e.context.contactRoles(100, 60);
+  assert.equal(result.status, 'ok'); assert.equal(result.more_pending, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.counts)), {written: 3, checked: 2, page_unavailable: 1, improved: 1});
+  assert.equal(fetched.length, 3);  // consumer rows are never touched
+  const rows = e.sheets.get('CONTACT_ROLES_001').values;
+  const by = Object.fromEntries(rows.slice(1).map(r => [r[0], Object.fromEntries(rows[0].map((h, i) => [h, r[i]]))]));
+  assert.equal(by['cc:1'].best_email, 'accounts@acme.co.za'); assert.equal(by['cc:1'].best_role, 'Accounts');
+  assert.equal(by['cc:1'].delivered_role, 'General'); assert.equal(by['cc:1'].other_mailboxes, 'info@acme.co.za');
+  assert.ok(!JSON.stringify(rows).includes('jane.doe') && !JSON.stringify(rows).includes('other.co.za'));
+  assert.ok(!JSON.stringify(rows).includes('info@co.za'));
+  assert.equal(by['cc:2'].best_email, 'sales@beta.co.za'); assert.equal(by['cc:2'].other_mailboxes, 'support@beta.co.za');
+  assert.equal(by['cc:3'].status, 'page_unavailable'); assert.equal(by['cc:3'].best_email, 'info@gone.co.za');
+  assert.equal(by['cc:1'].website, 'https://acme.co.za/');
+  assert.equal(JSON.stringify(e.sheets.get('VALIDATED_A_001').values), before);  // delivered rows unchanged
+  const again = e.context.contactRoles(100, 60);
+  assert.equal(again.counts.written, 0);  // rerun never duplicates an entry
+  assert.equal(e.sheets.get('CONTACT_ROLES_001').getLastRow(), 4);
+});
+
+test('contact roles roll over at 5000 entries and resume across runs', () => {
+  const e = environment();
+  const leads = Array.from({length: 5003}, (_, i) => ({id: 'cc:' + (i + 1), email: 'info@s' + i + '.co.za', name: 'S' + i,
+    url: 'https://s' + i + '.co.za/'}));
+  e.tab('VALIDATED_S_001').getRange(1, 1, 1, 1);  // ensure grid grows like the real sheet
+  const tab = businessTab(e, 'VALIDATED_S_002', leads);
+  tab.insertRowsAfter(0, 5000);
+  pages(e, {});
+  let first = e.context.contactRoles(2000, 60);
+  assert.equal(first.counts.written, 2000); assert.equal(first.more_pending, true);
+  while (first.more_pending) first = e.context.contactRoles(2000, 60);
+  assert.equal(e.sheets.get('CONTACT_ROLES_001').getLastRow(), 5001);
+  assert.equal(e.sheets.get('CONTACT_ROLES_002').getLastRow(), 4);
+  const ids = new Set();
+  for (const name of ['CONTACT_ROLES_001', 'CONTACT_ROLES_002']) e.sheets.get(name).values.slice(1).forEach(r => ids.add(r[0]));
+  assert.equal(ids.size, 5003);
+});
+
+test('contact role mailbox list matches the collector configuration', () => {
+  const yaml = fs.readFileSync('config/sources.yaml', 'utf8');
+  const block = yaml.slice(yaml.indexOf('business_locals:'));
+  const locals = [];
+  for (const line of block.split('\n').slice(1)) {
+    const m = /^\s+-\s+(\S+)\s*$/.exec(line);
+    if (!m) break;
+    locals.push(m[1]);
+  }
+  const e = environment();
+  assert.ok(locals.length > 10);
+  assert.deepEqual(Object.keys(vm.runInContext('ROLE_LOCALS_', e.context)).sort(), locals.slice().sort());
+});
+
 console.log('apps-script tests: ' + passed + ' passed (offline mocks only)');
