@@ -285,6 +285,42 @@ def test_business_contact_end_to_end_without_groq(postgres, isolated_settings, m
 
 
 @pytest.mark.integration
+def test_batched_admission_dedupes_within_and_across_batches(postgres, isolated_settings, monkeypatch):
+    from app.collectors.base import Batch, Record
+    from app.models import Dedupe, Job, SourceCursor, SourceRecord
+
+    def rec(host, text):
+        return Record(source_record_id=host, identity=host, url=f"https://{host}/", text=text,
+                      published_at=datetime.now(UTC))
+
+    batches = iter([
+        [rec("a.co.za", "x info@a.co.za"), rec("a.co.za", "y info@a.co.za"), rec("b.co.za", "x info@a.co.za"),
+         rec("c.co.za", "z info@c.co.za")],
+        [rec("c.co.za", "new text"), rec("d.co.za", "d info@d.co.za")],
+    ])
+
+    class Fake:
+        def collect(self, cursor, limit):
+            records = next(batches)
+            return Batch(records=records, cursor={"n": cursor.get("n", 0) + 1}, scanned=len(records))
+
+    monkeypatch.setitem(pipeline.ADAPTERS, "commoncrawl", Fake)
+    with postgres() as db:
+        db.add(SourceCursor(source="commoncrawl", enabled=True))
+        for n in (1, 2):
+            db.add(Job(idempotency_key=f"bulk-{n}", kind="collect", source="commoncrawl", batch_size=10))
+    with postgres() as db:
+        job1, job2 = db.query(Job).order_by(Job.id).all()
+    first = pipeline.collect(job1)
+    second = pipeline.collect(job2)
+    assert (first["stored"], first["duplicates"]) == (2, 2)  # same host twice; same content twice
+    assert (second["stored"], second["duplicates"]) == (1, 1)  # c.co.za already admitted
+    with postgres() as db:
+        assert sorted(r.source_record_id for r in db.query(SourceRecord)) == ["a.co.za", "c.co.za", "d.co.za"]
+        assert db.query(Dedupe).filter(Dedupe.key.like("record:%")).count() == 3
+
+
+@pytest.mark.integration
 def test_business_contact_without_valid_mailbox_is_rejected_not_no_email(postgres, isolated_settings, monkeypatch):
     from app.models import Candidate, Classification, Lead
 

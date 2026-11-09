@@ -83,19 +83,36 @@ def collect(job):
             raise SourceError("campaign_scan_budget_conflict")
         # The campaign scan counter advances via metric("all", "raw_scanned") below, same transaction.
         accepted = duplicates = 0
+        # Set-based admission (a few round trips per batch, not several per record): a record is
+        # admitted only when both its record and content keys are new, exactly as claim_hashes
+        # would decide one by one. Collection is serialized by the executor lock.
+        prepared, seen = [], set()
         for record in batch.records:
             text = normalize(record.text)
-            identity_hash = digest(job.source + ":" + record.identity)
-            content_hash = digest(text)
-            record_hash = digest(job.source + ":" + record.source_record_id)
-            if not claim_hashes(db, ["record:" + record_hash, "content:" + content_hash]):
+            keys = ("record:" + digest(job.source + ":" + record.source_record_id), "content:" + digest(text))
+            if keys[0] in seen or keys[1] in seen:
                 duplicates += 1
                 continue
-            db.execute(
-                insert(Identity)
-                .values(identity_hash=identity_hash)
-                .on_conflict_do_update(index_elements=["identity_hash"], set_={"last_seen_at": now()})
-            )
+            seen.update(keys)
+            prepared.append((record, text, keys))
+        existing = set(db.scalars(select(Dedupe.key).where(Dedupe.key.in_(sorted(seen))))) if seen else set()
+        fresh = [p for p in prepared if not (set(p[2]) & existing)]
+        duplicates += len(prepared) - len(fresh)
+        if fresh:
+            claimed = set(db.scalars(insert(Dedupe).values([{"key": k} for p in fresh for k in p[2]])
+                                     .on_conflict_do_nothing().returning(Dedupe.key)))
+            lost = [p for p in fresh if not set(p[2]) <= claimed]
+            if lost:  # defensive: release partial claims so admission stays all-or-nothing
+                db.execute(delete(Dedupe).where(Dedupe.key.in_([k for p in lost for k in p[2] if k in claimed])))
+                duplicates += len(lost)
+                fresh = [p for p in fresh if p not in lost]
+            identities = sorted({digest(job.source + ":" + p[0].identity) for p in fresh})
+            if identities:
+                db.execute(insert(Identity).values([{"identity_hash": h} for h in identities])
+                           .on_conflict_do_update(index_elements=["identity_hash"], set_={"last_seen_at": now()}))
+        for record, text, (_record_key, content_key) in fresh:
+            identity_hash = digest(job.source + ":" + record.identity)
+            content_hash = content_key.removeprefix("content:")
             db.add(
                 SourceRecord(
                     source=job.source,
