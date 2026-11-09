@@ -228,3 +228,25 @@ sources and their rules are unchanged.
 
 Measured from this PC: about 3 pages/s at 8 concurrent range requests, and about 28% of .za home
 pages publish such a mailbox (about 50 leads per minute of collection).
+
+## Hybrid business-contact run (2026-11-09): result
+
+Campaign `cc-business-20261109`, target 10,000, run 10:13-17:02 UTC (6 h 49 min) across Render (database
+stages, in-process scheduler) and the operator's PC (Common Crawl collection in failover assist mode).
+
+| Measure | Value |
+|---|---|
+| Pages scanned (Common Crawl CC-MAIN-2026-43, .za) | 33,175 |
+| Company sites stored (one generic mailbox found) | 10,598 |
+| Duplicate mailboxes / sites | 141 / 29 |
+| Rejected (insurer/broker sites, failed checks) | 132 |
+| Mailboxes failing validation (contact review) | 122 |
+| **Qualified BUSINESS_CONTACT finals delivered** | **10,305** (67 acknowledged batches) |
+| Pages yielding a lead | ~31% |
+
+Run fixes made live (all regression-tested): throttled pages queued for retry instead of ending the
+batch; device assist limited to collection and yielding to cloud work; set-based record admission
+(the PC is far from the database); scheduler runs several jobs per tick; failover loop survives
+transient OS errors; a delivery helper drove Apps Script delivery when the 5-minute trigger fell behind.
+Supply after the run: about 40% of the crawl's .za index was read. Afterwards: sources disabled,
+campaign COMPLETE, queues empty; contact-role entries (CONTACT_ROLES_###) generated from the Sheet.

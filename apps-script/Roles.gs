@@ -25,7 +25,7 @@ const ROLE_FIELDS_ = ['lead_id', 'business_name', 'website', 'delivered_email', 
   'best_role', 'other_mailboxes', 'checked_url', 'status', 'checked_at'];
 const ROLE_TAB_ = /^CONTACT_ROLES_(\d{3,})$/;
 const ROLE_SHARD_ROWS_ = 5000;
-const ROLE_FETCH_GROUP_ = 20;
+const ROLE_FETCH_GROUP_ = 50;
 const ROLE_ZA_SUFFIXES_ = ['za', 'co.za', 'org.za', 'ac.za', 'gov.za', 'net.za', 'web.za', 'nom.za', 'edu.za',
   'law.za', 'mil.za', 'school.za', 'alt.za', 'ngo.za', 'nis.za', 'tm.za', 'grondar.za', 'agric.za'];
 const ROLE_EMAIL_ = /(?<![\w.+-])([A-Za-z0-9._%+-]{1,64})@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24})(?![\w-])/g;
