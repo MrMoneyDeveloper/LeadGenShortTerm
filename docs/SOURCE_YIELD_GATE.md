@@ -144,3 +144,47 @@ capacity for 100,000.
 
 Source supply, freshness and duplicate rates must support those volumes; processing capacity alone
 cannot.
+
+## Source research (2026-11-09): why the runs yield zero
+
+Five research angles, each independently fact-checked; aggregates only. Research, not legal advice.
+
+**Canary status check.** The targeted Bluesky canary completed all 15 queries with `discovery_complete`,
+0 posts, 0 failures and no access errors, so its zeros are true zero volume, not a collector fault.
+
+**Causes, ranked:**
+
+1. **Public-email requirement (dominant, every platform).** 0 emails in ~1,871 sampled Bluesky posts
+   (and 0 in a second 703-post sample), 0 in 1,351 YouTube ZA comments. Of 513 bios of intent
+   authors, 7 had an email-like string (mostly businesses) and 0 combined an email with SA evidence.
+   People ask publicly but are contacted by reply/DM, not by publishing their email.
+2. **Bluesky has almost no South African population.** Over 30 days: `"car insurance" uk` 23 posts,
+   `"car insurance" johannesburg` 0, `"car insurance" "south africa"` 0; SA insurer names alone
+   (no intent filter) single/low double digits with 0 buying intent; Afrikaans terms and `lang=af`
+   ~0; `"funeral cover"` 4 posts worldwide. Bluesky traffic is ~47% US; SA is not in its top countries.
+3. **Platform mix.** South Africans are on TikTok, Facebook and YouTube (DataReportal 2026), which
+   are closed to automated commercial collection (Facebook Groups API removed 2024-04-22; TikTok
+   Research API academic only) or, for YouTube ZA comments, measured with no buying intent. X and
+   Reddit are small in SA and need paid/approved commercial API access.
+4. **Not the cause:** search syntax and the pipeline. Counts reproduced; loosening queries
+   (e.g. `miway` instead of `miway premium`) changes only tiny numbers.
+5. **Lead-model legality (end-use blocker, not the zero-yield cause).** POPIA s69 requires consent
+   for electronic direct marketing to non-customers, so scraped public emails cannot lawfully receive
+   insurance marketing without consent even if they were found. Lawful paths are opt-in (own
+   enquiry form, lead ads) or consented partner/affiliate feeds; FAIS referral-fee rules apply to
+   partners. Sources: POPIA (gov.za), Information Regulator direct-marketing guidance note.
+
+**Conclusion.** No public social source researched shows a path to 100,000 public-email finals. The
+target is only reachable if consented inbound or partner leads are defined as the qualifying
+category. Do not keep tuning Bluesky queries, rely on bios, or scrape platforms whose terms forbid
+it.
+
+**In-repo next steps (no external accounts or spend):** close Bluesky as a lead source (keep only
+as optional demand/training signal); add a cheap pre-adapter yield probe (counts + a few hundred
+screened samples) before building any source; report no-email SA intent prospects separately
+(never toward the target); draft an opt-in enquiry endpoint with consent provenance, kept disabled.
+
+**Operator decisions:** (1) redefine the qualifying lead (consented opt-in/partner vs public email);
+(2) channel and spend for a quote form (ads, referrals); (3) partner/comparison-site feeds with
+consent warranties; (4) optional paid X canary or permission-based forum canary; (5) SA
+privacy/FAIS legal review before any Phase 3 contact.
