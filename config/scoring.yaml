@@ -7,6 +7,7 @@ weights:
   vehicle: 15
   property: 15
   family: 10
+  broker_request: 30
   south_africa: 15
   insurer: 10
   broker: -60
@@ -28,6 +29,8 @@ require_contact: false
 negative_signals: [broker, job, advertisement, news, non_target]
 # Personal short-term and long-term products that count as in-scope leads.
 target_products: [MOTOR, HOME, CONTENTS, LIFE, FUNERAL, DISABILITY]
+# A consumer request for a broker cancels the broker-advertising penalty for that record.
+negative_overrides: {broker: broker_request}
 ranking:
   version: ordinal-rank-v2
   # These are configurable operating thresholds, not measured probabilities.
@@ -40,3 +43,8 @@ ranking:
   semantic_at: 8.0
   direct_at: 9.5
   semantic_accept_score: 80
+  # Records with explicit consumer intent, an in-scope product and SA evidence go to semantic review
+  # even below semantic_at. Acceptance still requires semantic_qualified (unchanged).
+  semantic_review:
+    enabled: true
+    intent_signals: [quote, recommendation, switch, broker_request]

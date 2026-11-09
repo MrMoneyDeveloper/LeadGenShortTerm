@@ -27,7 +27,16 @@ def rank(result, valid_contact, ml=None):
         ),
     )
     value = round(value, 3)
-    if result.get("rejected") or negative_ml or value < policy["defer_at"]:
+    review = policy.get("semantic_review", {})
+    # Narrow review route: explicit consumer intent + in-scope product + South African evidence, but
+    # a low rule score. Groq reviews it; final acceptance (semantic_qualified) is unchanged.
+    reviewable = bool(
+        review.get("enabled") and not result.get("rejected") and not negative_ml and valid_contact
+        and product and geography_signal and set(signals) & set(review.get("intent_signals", []))
+    )
+    if reviewable and value < policy["semantic_at"]:
+        route = "SEMANTIC"
+    elif result.get("rejected") or negative_ml or value < policy["defer_at"]:
         route = "REJECT"
     elif not valid_contact:
         route = "CONTACT_REVIEW"
@@ -40,6 +49,7 @@ def rank(result, valid_contact, ml=None):
     return {
         "rank_score": value,
         "route": route,
+        "review_route": bool(reviewable and route == "SEMANTIC" and value < policy["semantic_at"]),
         "version": policy["version"],
         "hard_gates": {
             "contact": bool(valid_contact),

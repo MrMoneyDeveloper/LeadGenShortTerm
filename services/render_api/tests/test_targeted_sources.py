@@ -7,6 +7,7 @@ import pytest
 
 from app.collectors import bluesky, youtube
 from app.collectors.profiles import bluesky_post_profile, profile
+from app.services import pipeline as _pipeline  # noqa: F401 - loaded before the postgres fixture patches sessions
 
 NOW = datetime.now(UTC)
 
@@ -208,3 +209,17 @@ def test_refused_deeper_page_ends_phrase_without_source_failure(search, isolated
     result = bluesky.Bluesky().collect({}, 500)
     assert [r.source_record_id for r in result.records] == ["did:plc:author1/rkey1", "did:plc:author2/rkey2"]
     assert result.stop_reason == "discovery_complete"
+
+
+def test_changed_query_set_resets_the_cursor(search, isolated_settings):
+    cfg, install = search
+    install(Fake({('"car insurance"', ""): {"posts": [post(1, "need car insurance")]},
+                  ('"funeral cover"', ""): {"posts": []},
+                  ('"car insurance" johannesburg', ""): {"posts": [post(2, "need car insurance in joburg")]}}))
+    cfg["max_requests_per_batch"] = 1
+    first = bluesky.Bluesky().collect({}, 500)
+    assert first.cursor["q"] == 1 and first.cursor["query_set"]
+    cfg["queries"] = ['"car insurance" johannesburg']  # new experiment: different query list
+    second = bluesky.Bluesky().collect(first.cursor, 500)
+    assert second.cursor["query_set"] != first.cursor["query_set"]
+    assert [r.source_record_id for r in second.records] == ["did:plc:author2/rkey2"]  # started at its own q=0

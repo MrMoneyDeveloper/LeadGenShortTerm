@@ -9,51 +9,25 @@ bluesky:
   overlap_hours: 1
   request_delay_seconds: 0.2
   fetch_profiles: true
+  # Targeted comparison set (2026-11-09): product + consumer intent + South African context.
+  # Discovery clues only; final qualification still needs evidence. Changing this list resets the
+  # cursor through its query-set checkpoint.
   queries:
-    # Short-term personal insurance
-    - '"car insurance"'
-    - '"motor insurance"'
-    - '"vehicle insurance"'
-    - '"car insurance" quote'
-    - '"home insurance"'
-    - '"household insurance"'
-    - '"contents insurance"'
-    - '"short term insurance"'
-    - '"short-term insurance"'
-    # Long-term personal insurance
-    - '"life insurance"'
-    - '"life cover"'
-    - '"funeral cover"'
-    - '"funeral policy"'
-    - '"funeral plan"'
-    - '"disability cover"'
-    - '"income protection"'
-    - '"long term insurance"'
-    # Intent phrasing
-    - insurance recommendations
-    - '"which insurer"'
-    - '"switch insurer"'
-    - '"insurance quote"'
-    - insurance premium increase
-    # South African context and insurers
-    - insurance south africa
-    - insurance joburg
-    - insurance "cape town"
-    - insurance durban
-    - outsurance
-    - santam
-    - miway
-    - '"king price"'
-    - '"discovery insure"'
-    - '"old mutual" insurance'
-    - sanlam insurance
-    - clientele funeral
-    - avbob
-    # Afrikaans
-    - versekering
+    - '"car insurance" johannesburg'
+    - '"car insurance" "cape town"'
+    - '"car insurance" durban'
+    - '"car insurance" pretoria'
+    - '"car insurance" "south africa"'
+    - '"insurance quote" "south africa"'
+    - '"home insurance" "south africa"'
+    - '"funeral cover" "south africa"'
+    - '"life cover" "south africa"'
+    - miway premium
+    - outsurance premium
+    - santam premium
+    - '"king price" insurance'
     - motorversekering
     - lewensversekering
-    - begrafnispolis
   # Legacy firehose settings (mode: firehose)
   seconds: 20
   reconnects: 2

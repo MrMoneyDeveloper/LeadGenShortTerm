@@ -139,7 +139,8 @@ def normalize_batch(limit):
         if records and cfg.remote_workers_enabled:
             remote, worker = remote_workers.match_batch([(r.id, r.text) for r in records], term_groups())
         for record in records:
-            result = score(record.text, record.source, record.published_at, remote.get(str(record.id)))
+            result = score(record.text, record.source, record.published_at, remote.get(str(record.id)),
+                           profile_text=(record.profile or {}).get("bio") or None)
             metric(db, record.source, "processed")
             if str(record.id) in remote:
                 metric(db, record.source, f"remote_{worker}_matched")

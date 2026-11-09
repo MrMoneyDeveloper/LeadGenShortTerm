@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import time
 from datetime import datetime, timedelta
@@ -39,6 +40,11 @@ class BlueskySearch:
             result.exhausted, result.stop_reason = True, "no_targets"
             return result
         current = now()
+        query_set = hashlib.sha256("\n".join(queries).encode("utf-8")).hexdigest()[:16]
+        if state.get("query_set") != query_set:
+            # A changed query list must never inherit the previous list's positional cursor.
+            state.clear()
+            state["query_set"] = query_set
         if state.get("refresh_at"):
             if current < datetime.fromisoformat(state["refresh_at"]):
                 result.exhausted, result.stop_reason = True, "awaiting_refresh"

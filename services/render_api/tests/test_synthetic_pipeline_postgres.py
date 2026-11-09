@@ -28,6 +28,10 @@ def add_raw(db, number, identity, text, status="PENDING", age_days=0):
     db.execute(insert(Identity).values(identity_hash=digest("synthetic:" + identity)).on_conflict_do_nothing())
 
 
+def states_before_check(db):
+    return set(db.scalars(select(Candidate.status)))
+
+
 @pytest.mark.usefixtures("require_contact")
 def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, monkeypatch):
     isolated_settings.delete_processed_raw = True
@@ -104,16 +108,20 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
         leads = db.scalars(select(Lead).order_by(Lead.email)).all()
         emails = [lead.email for lead in leads]
         assert "motor@example.org" in emails and "home@example.org" in emails
-        assert "ambiguous@example.org" not in emails  # Low evidence stays local-only under the new rank policy.
+        assert "ambiguous@example.org" not in emails  # A premium complaint alone is not a review-route request.
+        # A clear SA consumer request that ranks below semantic_at reaches semantic review (review route)
+        # instead of being dropped as DEFERRED; acceptance still came from the semantic decision.
+        assert "repeated@example.org" in emails
         assert emails.count("shared@example.org") == 1
-        assert db.scalar(select(func.count()).select_from(Lead)) == 3
-        # Three accepted leads plus no-contact, malformed-contact and no-MX review rows remain.
+        assert db.scalar(select(func.count()).select_from(Lead)) == 4
+        # Same six candidate rows as before: the review-route record moved from DEFERRED to VALIDATED.
         assert db.scalar(select(func.count()).select_from(Candidate)) == 6
+        assert "DEFERRED" not in states_before_check(db)
         states = dict(db.execute(select(Candidate.identity_hash, Candidate.status)).all())
         assert "CONTACT_REVIEW" in states.values()
         assert db.scalar(select(func.count()).select_from(SourceRecord)) == 0
-        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("email:%"))) == 3
-        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("lead:%"))) == 3
+        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("email:%"))) == 4
+        assert db.scalar(select(func.count()).select_from(Dedupe).where(Dedupe.key.like("lead:%"))) == 4
         assert db.get(SourceCursor, "synthetic") is None
 
     # Re-adding a source record after reduction cannot produce another accepted lead.
@@ -122,4 +130,4 @@ def test_complete_synthetic_funnel_and_idempotency(postgres, isolated_settings, 
     pipeline.normalize_batch(10)
     pipeline.validate_batch(10)
     with postgres() as db:
-        assert db.scalar(select(func.count()).select_from(Lead)) == 3
+        assert db.scalar(select(func.count()).select_from(Lead)) == 4

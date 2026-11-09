@@ -350,6 +350,18 @@ signals:
     - dotsure
     - first for women
     - virseker
+  broker_request:
+    # A consumer asking for a broker (overrides the broker-advertising penalty; see scoring.yaml).
+    - recommend a broker
+    - recommend an insurance broker
+    - recommend a good broker
+    - looking for a broker
+    - looking for an insurance broker
+    - need a broker
+    - need an insurance broker
+    - know a good broker
+    - any good brokers
+    - which broker
   broker:
     - insurance broker
     - insurance brokerage

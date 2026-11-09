@@ -40,28 +40,89 @@ rejected by the existing broker/role/disposable rules.
 | Classifieds and scraped sites | Sometimes | Sometimes | Excluded by default | Usually prohibited by terms of use |
 | Business directories | No consumer intent | Business addresses | Not acceptable | Would violate the target definition |
 
-## Bounded canary plan (prepared, not executed)
+## Experiment 1: broad Bluesky/YouTube run (2026-11-08 to 2026-11-09), concluded
 
-Pick **one** source at a time. Limits: at most 500 raw records, one day, existing per-source API
-caps, at most 20 Groq requests, and no change to qualification thresholds.
+Unattended collection ran about 10 hours, with every infrastructure check OK, then was paused
+(source rows disabled, work drained to zero). Checkpoints, hashes, receipts, samples and Google rows
+were preserved.
 
-Prerequisites: live database migrated to `0007`, Render deployed from `main`, Apps Script code
-pushed, the source enabled in `config/sources.yaml`, `ACQUISITION_ENABLED`/`PROCESSING_ENABLED`
-and the source's env flag set on Render, and the pipeline resumed.
+| Measure (Bluesky, both days) | Value |
+|---|---|
+| Posts scanned | 8,993 |
+| Stored after keyword filter | 530 |
+| Rule-qualified intent candidates | 62 |
+| Public emails found / passing MX | 1 / 1 |
+| Distinct qualified finals | **0** |
 
-Run through the existing API with the operator token (Render URL and tokens from the ignored `.env`):
+**Funnel audit** of the preserved same-cohort samples (20 strongest Bluesky intent candidates and 20
+insurance-relevant YouTube comments):
 
-1. `POST /admin/sources/<source>/enable`
-2. Repeat until about 500 raw records are stored: `POST /jobs/collect` with
-   `{"source": "<source>", "batch_size": 100}` and a fresh `Idempotency-Key`, then
-   `POST /jobs/process-next`.
-3. Let ticks drain normalize, validate and classify (or queue them with `POST /jobs/process`).
-4. Read `GET /dashboard/source-stats`, `GET /dashboard/backpressure` (`accepted_finals`) and
-   `GET /dashboard/samples` for the quality review.
-5. `POST /admin/sources/<source>/disable`.
+| Stage | Bluesky | YouTube |
+|---|---|---|
+| Consumer-intent signal | 20 | 0 |
+| In-scope product | 14 | 0 |
+| SA evidence in post | 0 | 19 |
+| SA evidence in author bio | 0 | n/a |
+| Public email (post or bio) | 0 | 0 |
+| Broker signal | 0 | 0 |
 
-Report raw stored, keyword matches, intent candidates, usable emails, SA evidence and finals.
+Manual review found every Bluesky rejection correct:
+- 9 anecdotes or complaints from the US, Netherlands, Canada or Norway;
+- 3 product pitches;
+- 2 insurer/broker adverts, rejected for low score rather than flagged as ads;
+- 5 politics, legislation, job and clinic posts;
+- 1 genuine consumer request, but for pet insurance in the US (out of scope).
 
-**Pass:** at least 5 real finals and at least 0.5% raw-to-final, with a clean quality review (no
-broker, generic or invented contacts). **Otherwise stop** and evaluate the next source category.
-Only a passing canary justifies a larger, still bounded run sized from the measured yield.
+No false rejections were found. The sources fail on complementary requirements: Bluesky has intent
+but no SA evidence or emails; YouTube has SA context but no buying intent. YouTube `regionCode=ZA`
+means videos viewable in South Africa, not that a commenter is South African.
+
+**Qualification gaps fixed afterwards (regression-tested, acceptance unchanged):**
+- same-author bio may supply explicit SA geography, with provenance `geography_evidence: profile_bio`;
+- a consumer asking for a broker (`broker_request`) is no longer penalised as broker advertising;
+- explicit consumer intent + in-scope product + SA evidence ranked below `semantic_at` now goes to
+  semantic review (`review_route`) instead of being dropped as DEFERRED;
+- the labelled fixture keeps precision 1.0 and 0 false positives.
+
+## Source priorities
+
+| Source | Role |
+|---|---|
+| Authorized first-party records or partner feed | First choice if available: verify intent, freshness, provenance and permitted use before import |
+| Own insurance enquiry form | Strongest contact capture; needs visitors or partner referrals to generate submissions |
+| Approved SA communities/forums | Small feasibility experiment only after access permission and contact availability are established |
+| Bluesky | Limited, targeted discovery experiment (below) |
+| YouTube | Paused |
+
+Opt-in or partner emails are consented contacts. They must be labelled separately from public emails
+and explicitly added to the target definition before they count. Reddit is not an immediately
+available commercial source: its Data API terms require approval for commercial access.
+
+## Bounded canary (one source at a time)
+
+Limits:
+- at most 500 **scanned** records or 24 hours, whichever comes first; stopped automatically by a
+  campaign started with `raw_target=500, duration_days=1` (drains when either is reached);
+- at most 20 Groq requests in total (`GROQ_DAILY_REQUEST_SOFT_CAP=5` per organization per UTC day);
+- existing qualification standards, no outbound messages.
+
+Do not repeat collection until some number of records is *stored*: that could take an uncontrolled
+number of scans. The scanned budget is the only acquisition bound.
+
+Report: scanned, unique stored, intent candidates, SA evidence, usable emails, distinct qualified
+finals (and no-email prospects separately), duplicates, provider usage and elapsed time. Manually
+review every final.
+
+**Expansion gate:** at least 5 distinct real qualified email contacts, each manually reviewed, before
+considering a larger bounded experiment (5 from 500 scanned is 1%). Zero finals stops that source
+experiment for investigation. Passing the gate permits further evaluation only; it does not establish
+capacity for 100,000.
+
+| Sustained unique-record yield | Records needed for 100,000 contacts |
+|---|---|
+| 1% | 10 million |
+| 5% | 2 million |
+| 10% | 1 million |
+
+Source supply, freshness and duplicate rates must support those volumes; processing capacity alone
+cannot.
